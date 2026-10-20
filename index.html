@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Portfolio & Archive | 개인 작업물 및 자료 아카이브</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- 상단 네비게이션 -->
+  <header class="site-header">
+    <div class="container header-inner">
+      <a href="#" class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-text">PORTFOLIO <span class="brand-sub">&amp; ARCHIVE</span></span>
+      </a>
+      <nav class="main-nav">
+        <a href="#gallery-section" id="nav-workspace-link" class="nav-link active">작업물 &amp; 자료실</a>
+        <button type="button" id="open-explore-modal-btn" class="btn btn-secondary btn-sm">
+          🔍 타인 공간 검색
+        </button>
+        <button type="button" id="open-add-modal-btn" class="btn btn-primary btn-sm">
+          + 새 작업물/자료 등록
+        </button>
+        <div id="auth-status-bar" class="auth-status-bar">
+          <button type="button" id="open-auth-modal-btn" class="btn btn-secondary btn-sm">
+            🔐 로그인 / 회원가입
+          </button>
+        </div>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <!-- 히어로 섹션 -->
+    <section class="hero-section">
+      <div class="container hero-inner">
+        <div id="workspace-owner-badge" class="hero-badge">Personal Portfolio &amp; Knowledge Archive</div>
+        <h1 id="workspace-hero-title" class="hero-title">
+          개발 프로젝트, 디자인 작업물,<br />
+          그리고 기술 문서를 기록하는 공간입니다.
+        </h1>
+        <p id="workspace-hero-desc" class="hero-desc">
+          각 계정마다 독립된 카테고리와 자료실 공간이 제공됩니다.
+        </p>
+
+        <div class="hero-stats" id="hero-stats">
+          <!-- JS에서 현재 로그인된 계정의 전체 항목 수 및 카테고리별 통계를 동적으로 렌더링 -->
+        </div>
+      </div>
+    </section>
+
+    <!-- 포트폴리오 및 아카이브 갤러리 섹션 -->
+    <section id="gallery-section" class="gallery-section">
+      <div class="container">
+        <!-- 읽기 전용 공유 열람 시 표시되는 안내 배너 -->
+        <div id="shared-readonly-banner" class="shared-readonly-banner hidden">
+          <div class="shared-banner-info">
+            <span class="shared-banner-badge">👁️ 읽기 전용 공유 모드</span>
+            <span id="shared-banner-text">타인의 공유 공간을 열람 중입니다. 자료 열람 및 다운로드만 가능하며 편집·추가·삭제할 수 없습니다.</span>
+          </div>
+          <div class="shared-banner-actions">
+            <button type="button" id="exit-shared-view-btn" class="btn btn-secondary btn-sm">내 공간 / 로그인으로 돌아가기</button>
+          </div>
+        </div>
+
+        <!-- 비로그인 시 표시되는 전용 공간 잠금 안내 -->
+        <div id="workspace-locked-state" class="empty-state hidden">
+          <div class="empty-icon">🔐</div>
+          <h3>계정별 전용 아카이브 공간입니다.</h3>
+          <p>로그인하여 내 전용 공간을 관리하거나, 상단의 <strong>🔍 타인 공간 검색</strong>에서 다른 사용자의 공유 공간을 읽기 전용으로 열람할 수 있습니다.</p>
+          <div class="locked-state-actions">
+            <button type="button" id="locked-login-btn" class="btn btn-primary">🔐 내 계정 로그인 / 회원가입</button>
+            <button type="button" id="locked-explore-btn" class="btn btn-secondary">🔍 타인 공간 검색</button>
+          </div>
+        </div>
+
+        <!-- 로그인 또는 공유 열람 시 표시되는 워크스페이스 영역 -->
+        <div id="workspace-active-content">
+          <!-- 필터 및 검색 컨트롤 바 -->
+          <div class="controls-bar">
+            <div class="category-bar-wrap">
+              <div class="category-tabs" id="category-tabs" role="tablist" aria-label="카테고리 필터">
+                <!-- JS에서 현재 계정의 카테고리 탭 동적 렌더링 -->
+              </div>
+              <button type="button" id="open-category-modal-btn" class="btn btn-secondary btn-sm category-manage-btn" title="내 공간의 카테고리 항목 추가, 색상/아이콘 설정 및 삭제">
+                ⚙️ 카테고리 편집
+              </button>
+            </div>
+
+            <div class="search-and-sort">
+              <div class="search-box">
+                <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+                <input
+                  type="search"
+                  id="search-input"
+                  placeholder="내 공간에서 제목, 태그, 내용 검색..."
+                  aria-label="작업물 및 자료 검색"
+                />
+              </div>
+
+              <select id="sort-select" class="sort-select" aria-label="정렬 기준">
+                <option value="newest">최신순</option>
+                <option value="oldest">오래된순</option>
+                <option value="title">이름순</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 결과 상태 안내 -->
+          <div class="results-meta">
+            <span id="results-count">총 0개의 항목</span>
+            <div class="data-actions">
+              <button type="button" id="export-json-btn" class="text-btn" title="현재 계정의 데이터를 JSON 파일로 백업합니다">내 공간 JSON 백업 다운로드</button>
+            </div>
+          </div>
+
+          <!-- 카드 그리드 -->
+          <div id="portfolio-grid" class="portfolio-grid">
+            <!-- JS에서 렌더링 -->
+          </div>
+
+          <!-- 검색 결과 없음 안내 -->
+          <div id="empty-state" class="empty-state hidden">
+            <div class="empty-icon">📂</div>
+            <h3>이 공간에 조건에 맞는 작업물이나 자료가 없습니다.</h3>
+            <p>상단의 <strong>+ 새 작업물/자료 등록</strong> 버튼으로 자료를 추가하거나 필터를 변경해 보세요.</p>
+            <button type="button" id="reset-filter-btn" class="btn btn-outline">필터 초기화</button>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- 푸터 -->
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <p>&copy; 2026 Portfolio &amp; Archive. Built with Pure HTML, CSS &amp; JavaScript.</p>
+      <div class="footer-links">
+        <a href="#gallery-section">작업물 &amp; 자료실</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- 상세 보기 모달 (Detail Modal) -->
+  <div id="detail-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-container">
+      <button type="button" class="modal-close-btn" id="close-detail-modal" aria-label="모달 닫기">&times;</button>
+
+      <div id="modal-banner" class="modal-banner">
+        <div class="modal-banner-meta">
+          <span id="modal-category-badge" class="badge">카테고리</span>
+          <span id="modal-author" class="modal-date">👤 작성자</span>
+          <span id="modal-date" class="modal-date">2026.10</span>
+        </div>
+        <h2 id="modal-title" class="modal-title">프로젝트 제목</h2>
+        <p id="modal-subtitle" class="modal-subtitle">요약 설명</p>
+      </div>
+
+      <div class="modal-body">
+        <div class="modal-section" id="modal-media-section">
+          <h3 class="modal-section-title">첨부 영상 및 미디어</h3>
+          <div id="modal-media-list" class="modal-media-list"></div>
+        </div>
+
+        <div class="modal-section">
+          <h3 class="modal-section-title">상세 내용 및 기록</h3>
+          <div id="modal-description" class="modal-description"></div>
+        </div>
+
+        <div class="modal-section" id="modal-highlights-section">
+          <h3 class="modal-section-title">주요 내용 / 핵심 포인트</h3>
+          <ul id="modal-highlights" class="modal-highlights"></ul>
+        </div>
+
+        <div class="modal-section" id="modal-files-section">
+          <h3 class="modal-section-title">첨부 문서 및 다운로드 파일</h3>
+          <div id="modal-files-list" class="modal-files-list"></div>
+          <div id="modal-doc-preview" class="modal-doc-preview hidden">
+            <div class="doc-preview-header">
+              <span id="doc-preview-title">문서 미리보기</span>
+              <button type="button" id="close-doc-preview-btn" class="text-btn">닫기 &times;</button>
+            </div>
+            <div id="doc-preview-body" class="doc-preview-body"></div>
+          </div>
+        </div>
+
+        <div class="modal-section">
+          <h3 class="modal-section-title">사용 기술 및 태그</h3>
+          <div id="modal-tags" class="card-tags"></div>
+        </div>
+
+        <div class="modal-section" id="modal-links-section">
+          <h3 class="modal-section-title">관련 외부 링크</h3>
+          <div id="modal-links" class="modal-links"></div>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <div class="modal-footer-left">
+          <button type="button" id="delete-item-btn" class="btn btn-danger-ghost">항목 삭제</button>
+          <span id="delete-permission-hint" class="permission-hint hidden">🔒 작성자 본인만 삭제할 수 있습니다</span>
+        </div>
+        <button type="button" id="close-detail-footer-btn" class="btn btn-secondary">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 새 항목 추가 모달 (Add Item Modal) -->
+  <div id="add-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
+    <div class="modal-container">
+      <button type="button" class="modal-close-btn" id="close-add-modal" aria-label="모달 닫기">&times;</button>
+
+      <div class="modal-header-simple">
+        <h2 id="add-modal-title">새 작업물 / 자료 등록</h2>
+        <p>포트폴리오 프로젝트, 시연 영상, 또는 보관할 문서 파일을 함께 등록합니다.</p>
+      </div>
+
+      <form id="add-item-form" class="modal-body form-body">
+        <div class="form-row">
+          <div class="form-group">
+            <div class="label-with-action">
+              <label for="item-category">카테고리 *</label>
+              <button type="button" id="open-cat-from-add-btn" class="text-btn">+ 항목 추가/편집</button>
+            </div>
+            <select id="item-category" required>
+              <!-- JS에서 동적 렌더링 -->
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="item-date">날짜 / 기간 *</label>
+            <input type="text" id="item-date" placeholder="예: 2026.10" value="2026.10" required />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="item-title">제목 *</label>
+          <input type="text" id="item-title" placeholder="프로젝트명 또는 문서 제목을 입력하세요" required />
+        </div>
+
+        <div class="form-group">
+          <label for="item-summary">한 줄 요약 *</label>
+          <input type="text" id="item-summary" placeholder="카드 목록에 표시될 짧은 설명을 입력하세요" required />
+        </div>
+
+        <div class="form-group">
+          <label for="item-description">상세 설명 / 아카이브 본문 *</label>
+          <textarea id="item-description" rows="4" placeholder="상세 모달에 표시될 프로젝트 설명이나 문서 본문을 입력하세요" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label for="item-highlights">주요 특징 / 핵심 요약 (줄바꿈으로 구분)</label>
+          <textarea id="item-highlights" rows="3" placeholder="반응형 레이아웃 설계&#10;성능 최적화 및 번들 사이즈 40% 절감&#10;설계 문서 및 API 명세서 포함"></textarea>
+        </div>
+
+        <!-- 파일 첨부 (영상 / 문서 / 이미지) -->
+        <div class="form-group">
+          <label>영상 및 문서 파일 첨부 (다중 선택 가능)</label>
+          <div id="file-drop-zone" class="file-drop-zone">
+            <input
+              type="file"
+              id="item-files"
+              multiple
+              accept="video/*,image/*,.pdf,.md,.txt,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.zip,.csv,.json,.hwp"
+              class="file-input-hidden"
+            />
+            <div class="drop-zone-content">
+              <span class="drop-zone-icon">📎</span>
+              <p class="drop-zone-title">클릭하여 파일 선택 또는 여기로 파일을 드래그하세요</p>
+              <p class="drop-zone-hint">지원: 영상(MP4, WebM 등), 문서(PDF, MD, TXT, DOCX, PPTX, ZIP 등), 이미지</p>
+            </div>
+          </div>
+          <ul id="selected-files-list" class="selected-files-list"></ul>
+        </div>
+
+        <!-- 외부 영상 URL (YouTube / 직접 영상 링크) -->
+        <div class="form-group">
+          <label for="item-video-url">외부 영상 URL (선택 - YouTube 또는 동영상 직접 링크)</label>
+          <input type="url" id="item-video-url" placeholder="예: https://www.youtube.com/watch?v=... 또는 https://.../demo.mp4" />
+        </div>
+
+        <div class="form-group">
+          <label for="item-tags">태그 (쉼표로 구분)</label>
+          <input type="text" id="item-tags" placeholder="예: TypeScript, React, Figma, 아키텍처" />
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="item-link-label">관련 링크 이름 (선택)</label>
+            <input type="text" id="item-link-label" placeholder="예: GitHub 저장소 / 배포 사이트" />
+          </div>
+          <div class="form-group">
+            <label for="item-link-url">관련 링크 URL (선택)</label>
+            <input type="url" id="item-link-url" placeholder="https://..." />
+          </div>
+        </div>
+
+        <div class="modal-footer form-footer">
+          <button type="button" id="cancel-add-btn" class="btn btn-secondary">취소</button>
+          <button type="submit" id="submit-add-btn" class="btn btn-primary">등록하기</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 카테고리(분류 항목) 관리 모달 -->
+  <div id="category-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="category-modal-title">
+    <div class="modal-container">
+      <button type="button" class="modal-close-btn" id="close-category-modal" aria-label="모달 닫기">&times;</button>
+
+      <div class="modal-header-simple">
+        <h2 id="category-modal-title">카테고리 항목 관리</h2>
+        <p>기본 예시 항목(개발/디자인/문서)을 삭제하거나, 원하는 색상과 아이콘으로 새 항목을 추가할 수 있습니다.</p>
+      </div>
+
+      <div class="modal-body">
+        <!-- 현재 등록된 카테고리 목록 -->
+        <div class="modal-section">
+          <h3 class="modal-section-title">현재 카테고리 목록</h3>
+          <ul id="category-manage-list" class="category-manage-list">
+            <!-- JS에서 동적 렌더링 -->
+          </ul>
+        </div>
+
+        <!-- 새 카테고리 추가 폼 -->
+        <form id="add-category-form" class="category-add-box">
+          <h3 class="modal-section-title">+ 새 카테고리 항목 추가</h3>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="cat-name-input">항목 이름 *</label>
+              <input type="text" id="cat-name-input" placeholder="예: 영상 작업, TRPG 캠페인, 논문/연구" required />
+            </div>
+            <div class="form-group">
+              <label for="cat-sub-input">커버 부제 (선택)</label>
+              <input type="text" id="cat-sub-input" placeholder="예: Video &amp; Motion Archive" />
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>대표 색상 설정 *</label>
+            <div class="color-picker-row">
+              <input type="color" id="cat-color-input" value="#7c3aed" class="color-input-native" />
+              <span id="cat-color-hex" class="color-hex-code">#7C3AED</span>
+              <div class="color-swatches" id="color-swatch-list">
+                <button type="button" class="color-swatch" data-color="#2563eb" style="background:#2563eb" title="블루"></button>
+                <button type="button" class="color-swatch" data-color="#ec4899" style="background:#ec4899" title="핑크"></button>
+                <button type="button" class="color-swatch" data-color="#10b981" style="background:#10b981" title="에메랄드"></button>
+                <button type="button" class="color-swatch" data-color="#7c3aed" style="background:#7c3aed" title="바이올렛"></button>
+                <button type="button" class="color-swatch" data-color="#f59e0b" style="background:#f59e0b" title="앰버"></button>
+                <button type="button" class="color-swatch" data-color="#ef4444" style="background:#ef4444" title="레드"></button>
+                <button type="button" class="color-swatch" data-color="#06b6d4" style="background:#06b6d4" title="시안"></button>
+                <button type="button" class="color-swatch" data-color="#334155" style="background:#334155" title="슬레이트"></button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>아이콘 설정 (이모지 선택 또는 이미지 파일 가져오기) *</label>
+            <div class="icon-config-grid">
+              <!-- 현재 아이콘 미리보기 -->
+              <div class="icon-preview-card" id="cat-icon-preview-card">
+                <div id="cat-icon-preview-display" class="icon-preview-display">🎲</div>
+                <span class="icon-preview-caption">미리보기</span>
+              </div>
+
+              <div class="icon-controls">
+                <div class="icon-input-row">
+                  <input type="text" id="cat-emoji-input" value="🎲" maxlength="4" placeholder="이모지 입력" />
+                  <label for="cat-icon-file" class="btn btn-secondary btn-sm icon-upload-label">
+                    📁 내 컴퓨터에서 아이콘 이미지 가져오기
+                  </label>
+                  <input type="file" id="cat-icon-file" accept="image/*,.svg,.png,.jpg,.jpeg,.webp,.gif,.ico" class="file-input-hidden" />
+                  <button type="button" id="clear-custom-icon-btn" class="text-btn hidden">이미지 해제</button>
+                </div>
+
+                <div class="emoji-presets" id="emoji-preset-list">
+                  <button type="button" class="emoji-preset-btn" data-emoji="💻">💻</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="🎨">🎨</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="📑">📑</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="🎬">🎬</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="🎲">🎲</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="📚">📚</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="🧪">🧪</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="🎵">🎵</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="📷">📷</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="🚀">🚀</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="🗂️">🗂️</button>
+                  <button type="button" class="emoji-preset-btn" data-emoji="✨">✨</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="category-add-actions">
+            <button type="submit" class="btn btn-primary">+ 카테고리 추가하기</button>
+          </div>
+        </form>
+      </div>
+
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button type="button" id="close-category-footer-btn" class="btn btn-secondary">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 사용자 로그인 및 계정 생성 모달 -->
+  <div id="auth-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="auth-modal-title">
+    <div class="modal-container auth-modal-container">
+      <button type="button" class="modal-close-btn" id="close-auth-modal" aria-label="모달 닫기">&times;</button>
+
+      <div class="modal-header-simple">
+        <h2 id="auth-modal-title">사용자 로그인 &amp; 계정 관리</h2>
+        <p>계정을 전환하면 해당 계정의 고유한 카테고리와 자료실 공간으로 이동합니다.</p>
+      </div>
+
+      <div class="modal-body auth-modal-body">
+        <!-- 탭 전환 (로그인 / 새 계정 만들기) -->
+        <div class="auth-tabs">
+          <button type="button" class="auth-tab-btn active" data-tab="login">기존 계정 로그인</button>
+          <button type="button" class="auth-tab-btn" data-tab="signup">+ 새 사용자 등록 (회원가입)</button>
+        </div>
+
+        <div id="auth-alert" class="auth-alert hidden"></div>
+
+        <!-- 로그인 폼 -->
+        <form id="login-form" class="auth-form-stack">
+          <div class="form-group">
+            <label for="login-id">아이디 (ID) *</label>
+            <input type="text" id="login-id" placeholder="아이디를 입력하세요" required autocomplete="username" />
+          </div>
+
+          <div class="form-group">
+            <label for="login-pw">비밀번호 (Password) *</label>
+            <input type="password" id="login-pw" placeholder="비밀번호를 입력하세요" required autocomplete="current-password" />
+          </div>
+
+          <div class="auth-submit-row">
+            <button type="submit" class="btn btn-primary auth-submit-btn">로그인하여 내 공간 열기</button>
+          </div>
+        </form>
+
+        <!-- 회원가입(새 계정 추가) 폼 -->
+        <form id="signup-form" class="auth-form-stack hidden">
+          <div class="form-group">
+            <label for="signup-id">사용할 아이디 (ID) *</label>
+            <input type="text" id="signup-id" placeholder="영문 또는 숫자 2자 이상 (예: user2)" required autocomplete="username" />
+          </div>
+
+          <div class="form-group">
+            <label for="signup-name">표시 이름 / 닉네임 *</label>
+            <input type="text" id="signup-name" placeholder="화면 상단과 공간 이름에 표시될 닉네임 (예: 김개발)" required />
+          </div>
+
+          <div class="form-group">
+            <label for="signup-pw">비밀번호 *</label>
+            <input type="password" id="signup-pw" placeholder="비밀번호를 입력하세요 (2자리 이상)" required autocomplete="new-password" />
+          </div>
+
+          <div class="form-group">
+            <label for="signup-pw-confirm">비밀번호 확인 *</label>
+            <input type="password" id="signup-pw-confirm" placeholder="비밀번호를 한 번 더 입력하세요" required autocomplete="new-password" />
+          </div>
+
+          <div class="auth-submit-row">
+            <button type="submit" class="btn btn-primary auth-submit-btn">새 계정 생성 및 전용 공간 시작하기</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- 타인 계정 및 공유 공간 검색 모달 -->
+  <div id="explore-users-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="explore-users-title">
+    <div class="modal-container auth-modal-container">
+      <button type="button" class="modal-close-btn" id="close-explore-users-modal" aria-label="모달 닫기">&times;</button>
+
+      <div class="modal-header-simple">
+        <h2 id="explore-users-title">🔍 타인 공간 검색 및 열람</h2>
+        <p>다른 사용자의 아이디(ID)나 이름을 검색하여 공개된 공간을 읽기 전용(편집 불가)으로 열람합니다.</p>
+      </div>
+
+      <div class="modal-body auth-modal-body">
+        <div class="search-box">
+          <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+          </svg>
+          <input
+            type="search"
+            id="explore-user-search-input"
+            placeholder="찾으실 사용자의 아이디 또는 닉네임 입력..."
+            aria-label="타인 계정 검색"
+          />
+        </div>
+
+        <div class="modal-section">
+          <h3 class="modal-section-title">공유 공간 검색 결과</h3>
+          <ul id="explore-users-list" class="explore-users-list">
+            <!-- JS에서 검색된 공유 계정 목록 렌더링 -->
+          </ul>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="justify-content: flex-end;">
+        <button type="button" id="close-explore-footer-btn" class="btn btn-secondary">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 내 공간 공유 설정 및 계정 삭제 모달 -->
+  <div id="account-settings-modal" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="account-settings-title">
+    <div class="modal-container auth-modal-container">
+      <button type="button" class="modal-close-btn" id="close-account-settings-modal" aria-label="모달 닫기">&times;</button>
+
+      <div class="modal-header-simple">
+        <h2 id="account-settings-title">내 공간 공유 &amp; 계정 설정</h2>
+        <p id="account-settings-subtitle">타인에게 내 공간을 읽기 전용으로 공유하거나 계정을 관리합니다.</p>
+      </div>
+
+      <div class="modal-body auth-modal-body">
+        <!-- 1. 타인에게 공간 공유 (읽기 전용) 섹션 -->
+        <div class="settings-section-box">
+          <div class="settings-section-header">
+            <div>
+              <h3 class="settings-box-title">🔗 타인에게 내 공간 공유 (읽기 전용)</h3>
+              <p class="settings-box-desc">공유받은 타인은 작업물과 첨부 자료를 열람·다운로드만 할 수 있으며, 추가·편집·삭제할 수 없습니다.</p>
+            </div>
+            <label class="toggle-switch" title="공유 허용 여부">
+              <input type="checkbox" id="share-allow-checkbox" checked />
+              <span class="toggle-Label-text">공유 허용</span>
+            </label>
+          </div>
+
+          <div id="share-link-area" class="share-link-area">
+            <div class="share-url-row">
+              <input type="text" id="share-url-input" readonly aria-label="읽기 전용 공유 링크" />
+              <button type="button" id="copy-share-url-btn" class="btn btn-primary btn-sm">링크 복사</button>
+            </div>
+            <div class="share-preview-row">
+              <span id="copy-share-feedback" class="share-feedback"></span>
+              <button type="button" id="preview-readonly-btn" class="btn btn-secondary btn-sm">
+                👁️ 타인 시점(읽기 전용)으로 내 공간 미리보기
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 계정 영구 삭제 (위험 구역) 섹션 -->
+        <div class="settings-section-box danger-zone-box">
+          <h3 class="settings-box-title danger-title">⚠️ 계정 및 전용 공간 영구 삭제</h3>
+          <p class="settings-box-desc">
+            현재 로그인된 계정과 이 공간에 등록된 모든 작업물, 카테고리, 첨부파일이 영구적으로 삭제되며 복구할 수 없습니다.
+          </p>
+
+          <form id="delete-account-form" class="delete-account-form">
+            <div class="form-group">
+              <label for="delete-account-pw">본인 확인을 위해 현재 계정의 비밀번호를 입력하세요 *</label>
+              <input type="password" id="delete-account-pw" placeholder="현재 계정 비밀번호 입력" required autocomplete="current-password" />
+            </div>
+            <div id="delete-account-alert" class="auth-alert hidden"></div>
+            <div class="category-add-actions">
+              <button type="submit" class="btn btn-danger-solid">내 계정 및 공간 영구 삭제</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
