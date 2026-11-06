@@ -8,10 +8,27 @@
 
 const USERS_STORAGE_KEY = 'portfolio_archive_users_v2';
 const SESSION_STORAGE_KEY = 'portfolio_archive_session_v2';
+const INVITE_CODE_STORAGE_KEY = 'portfolio_archive_invite_code_v1';
+const DEFAULT_INVITE_CODE = 'SJU2026'; // 기본 지인 초대 코드
 
 const IDB_NAME = 'PortfolioArchiveDB';
 const IDB_VERSION = 1;
 const IDB_STORE = 'attachments';
+
+function getStoredInviteCode() {
+  try {
+    const code = localStorage.getItem(INVITE_CODE_STORAGE_KEY);
+    return code || DEFAULT_INVITE_CODE;
+  } catch (_) {
+    return DEFAULT_INVITE_CODE;
+  }
+}
+
+function setStoredInviteCode(newCode) {
+  try {
+    localStorage.setItem(INVITE_CODE_STORAGE_KEY, newCode.trim());
+  } catch (_) {}
+}
 
 function getUserCategoriesStorageKey(userId) {
   return `portfolio_archive_cats_user_${String(userId).toLowerCase()}`;
@@ -21,8 +38,18 @@ function getUserItemsStorageKey(userId) {
   return `portfolio_archive_items_user_${String(userId).toLowerCase()}`;
 }
 
-// 간단한 비밀번호 해시 함수 (평문 저장 방지용)
-function hashPassword(rawPassword) {
+// 표준 Web Crypto SHA-256 비동기 암호화 함수 (Salt 포함)
+async function hashPassword(rawPassword) {
+  const str = `pa_salt_2026_${String(rawPassword)}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(str);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// 레거시 해시 호환 함수 (기존 32비트 해시 검증용)
+function legacyHashPassword(rawPassword) {
   const str = `pa_salt_2026_${String(rawPassword)}`;
   let h1 = 0xdeadbeef ^ str.length;
   let h2 = 0x41c6ce57 ^ str.length;
@@ -36,18 +63,34 @@ function hashPassword(rawPassword) {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
 }
 
+// 비밀번호 검증 헬퍼 (SHA-256 우선 비교 및 레거시 해시 마이그레이션)
+async function verifyPassword(user, rawPassword) {
+  if (!user || !user.passwordHash) return false;
+  const shaHash = await hashPassword(rawPassword);
+  if (user.passwordHash === shaHash) return true;
+  // 기존 단순 해시인 경우 점검 후 SHA-256으로 자동 마이그레이션
+  const legacyHash = legacyHashPassword(rawPassword);
+  if (user.passwordHash === legacyHash) {
+    user.passwordHash = shaHash;
+    saveUsers();
+    return true;
+  }
+  return false;
+}
+
 // 기본 예시 사용자 계정 (초기 비밀번호: 1234, 기본 공유 허용: true)
+// SHA-256("pa_salt_2026_1234") = 'd140e6118b6fc8e604ec224f8087f9ad07ea69a23d4cffaaee6e06b97b670f59'
 const INITIAL_USERS = [
   {
     id: 'admin',
     name: '관리자',
-    passwordHash: hashPassword('1234'),
+    passwordHash: 'd140e6118b6fc8e604ec224f8087f9ad07ea69a23d4cffaaee6e06b97b670f59',
     shareEnabled: true
   },
   {
     id: 'designer',
     name: '김디자인',
-    passwordHash: hashPassword('1234'),
+    passwordHash: 'd140e6118b6fc8e604ec224f8087f9ad07ea69a23d4cffaaee6e06b97b670f59',
     shareEnabled: true
   }
 ];
@@ -217,6 +260,7 @@ let sortOrder = 'newest';
 let selectedItemId = null;
 let pendingFiles = [];
 let activeObjectUrls = [];
+let editingCategoryId = null; // 현재 수정 중인 카테고리 ID (null이면 신규 등록 모드)
 let customCatIconDataUrl = null;
 
 // DOM 요소 참조
@@ -291,6 +335,9 @@ const closeCategoryModalBtn = document.getElementById('close-category-modal');
 const closeCategoryFooterBtn = document.getElementById('close-category-footer-btn');
 const categoryManageList = document.getElementById('category-manage-list');
 const addCategoryForm = document.getElementById('add-category-form');
+const catFormTitle = document.getElementById('cat-form-title');
+const cancelEditCatBtn = document.getElementById('cancel-edit-cat-btn');
+const catSubmitBtn = document.getElementById('cat-submit-btn');
 const catNameInput = document.getElementById('cat-name-input');
 const catSubInput = document.getElementById('cat-sub-input');
 const catColorInput = document.getElementById('cat-color-input');
@@ -315,6 +362,7 @@ const signupIdInput = document.getElementById('signup-id');
 const signupNameInput = document.getElementById('signup-name');
 const signupPwInput = document.getElementById('signup-pw');
 const signupPwConfirmInput = document.getElementById('signup-pw-confirm');
+const inviteCodeInput = document.getElementById('invite-code');
 
 // 타인 계정/공간 검색 모달 요소
 const exploreUsersModal = document.getElementById('explore-users-modal');
@@ -323,15 +371,45 @@ const closeExploreFooterBtn = document.getElementById('close-explore-footer-btn'
 const exploreUserSearchInput = document.getElementById('explore-user-search-input');
 const exploreUsersList = document.getElementById('explore-users-list');
 
-// 공간 공유 설정 및 계정 삭제 모달 요소
-const accountSettingsModal = document.getElementById('account-settings-modal');
-const closeAccountSettingsModalBtn = document.getElementById('close-account-settings-modal');
+// 타인 공유 설정 전용 모달 요소
+const shareSettingsModal = document.getElementById('share-settings-modal');
+const closeShareSettingsModalBtn = document.getElementById('close-share-settings-modal');
+const closeShareFooterBtn = document.getElementById('close-share-footer-btn');
 const shareAllowCheckbox = document.getElementById('share-allow-checkbox');
 const shareLinkArea = document.getElementById('share-link-area');
 const shareUrlInput = document.getElementById('share-url-input');
 const copyShareUrlBtn = document.getElementById('copy-share-url-btn');
 const copyShareFeedback = document.getElementById('copy-share-feedback');
 const previewReadonlyBtn = document.getElementById('preview-readonly-btn');
+const inviteCodeManagerBox = document.getElementById('invite-code-manager-box');
+const manageInviteCodeInput = document.getElementById('manage-invite-code-input');
+const saveInviteCodeBtn = document.getElementById('save-invite-code-btn');
+const manageInviteFeedback = document.getElementById('manage-invite-feedback');
+
+// 계정 설정 및 인삿말/비밀번호 변경 모달 요소
+const accountSettingsModal = document.getElementById('account-settings-modal');
+const closeAccountSettingsModalBtn = document.getElementById('close-account-settings-modal');
+const closeAccountFooterBtn = document.getElementById('close-account-footer-btn');
+
+// 프로필 표시 이름 변경 폼 요소
+const profileNameForm = document.getElementById('profile-name-form');
+const editProfileNameInput = document.getElementById('edit-profile-name-input');
+const profileNameFeedback = document.getElementById('profile-name-feedback');
+
+// 헤더 인삿말 및 비밀번호 변경 폼 요소
+const heroCustomForm = document.getElementById('hero-custom-form');
+const customHeroTitleInput = document.getElementById('custom-hero-title-input');
+const customHeroDescInput = document.getElementById('custom-hero-desc-input');
+const resetHeroCustomBtn = document.getElementById('reset-hero-custom-btn');
+const heroCustomFeedback = document.getElementById('hero-custom-feedback');
+
+const changePasswordForm = document.getElementById('change-password-form');
+const currentPwInput = document.getElementById('current-pw-input');
+const newPwInput = document.getElementById('new-pw-input');
+const newPwConfirmInput = document.getElementById('new-pw-confirm-input');
+const changePwAlert = document.getElementById('change-pw-alert');
+const changePwFeedback = document.getElementById('change-pw-feedback');
+
 const deleteAccountForm = document.getElementById('delete-account-form');
 const deleteAccountPwInput = document.getElementById('delete-account-pw');
 const deleteAccountAlert = document.getElementById('delete-account-alert');
@@ -529,11 +607,25 @@ function getFileIcon(att) {
   return '📄';
 }
 
+// 안전한 외부 URL 검증 함수 (XSS javascript: 및 악성 스키마 방지)
+function sanitizeUrl(rawUrl) {
+  if (!rawUrl) return '';
+  const trimmed = String(rawUrl).trim();
+  try {
+    const parsed = new URL(trimmed, window.location.origin);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return trimmed;
+    }
+  } catch (_) {}
+  return '';
+}
+
 function parseExternalVideoUrl(url) {
   if (!url) return null;
-  const trimmed = url.trim();
+  const safeUrl = sanitizeUrl(url);
+  if (!safeUrl) return null;
 
-  const ytMatch = trimmed.match(
+  const ytMatch = safeUrl.match(
     /(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)([A-Za-z0-9_-]{6,})/
   );
   if (ytMatch && ytMatch[1]) {
@@ -543,7 +635,7 @@ function parseExternalVideoUrl(url) {
     };
   }
 
-  const vimeoMatch = trimmed.match(/vimeo\.com\/(\d+)/);
+  const vimeoMatch = safeUrl.match(/vimeo\.com\/(\d+)/);
   if (vimeoMatch && vimeoMatch[1]) {
     return {
       mode: 'iframe',
@@ -553,7 +645,7 @@ function parseExternalVideoUrl(url) {
 
   return {
     mode: 'video',
-    src: trimmed
+    src: safeUrl
   };
 }
 
@@ -768,8 +860,11 @@ function renderAuthStatusBar() {
       <div class="user-profile-pill" title="현재 로그인된 계정">
         <span>👤 ${escapeHtml(currentUser.name)} (${escapeHtml(currentUser.id)})</span>
       </div>
-      <button type="button" id="open-share-settings-btn" class="btn btn-secondary btn-sm" title="타인에게 읽기 전용 공유 또는 계정 삭제">
-        🔗 공유 &amp; 계정 설정
+      <button type="button" id="open-share-modal-btn" class="btn btn-secondary btn-sm" title="타인에게 내 공간 읽기 전용 공유 링크 복사 및 초대 코드 관리">
+        🔗 공유 설정
+      </button>
+      <button type="button" id="open-account-settings-btn" class="btn btn-secondary btn-sm" title="내 공간 인삿말 설정, 비밀번호 변경 및 계정 관리">
+        ⚙️ 계정 설정
       </button>
       <button type="button" id="logout-btn" class="text-btn">로그아웃</button>
     `;
@@ -808,14 +903,22 @@ function renderWorkspaceHeaderAndPermissions() {
 
   // 히어로 영역 및 잠금 화면 제어
   if (viewingUser) {
+    const ownerObj = users.find((u) => u.id.toLowerCase() === viewingUser.id.toLowerCase());
+    const customTitle = ownerObj && ownerObj.customHeroTitle ? ownerObj.customHeroTitle.trim() : '';
+    const customDesc = ownerObj && ownerObj.customHeroDesc ? ownerObj.customHeroDesc.trim() : '';
+
     if (readOnly) {
       workspaceOwnerBadge.textContent = `👁️ [읽기 전용 공유] ${viewingUser.name} (${viewingUser.id})님의 아카이브`;
-      workspaceHeroTitle.innerHTML = `${escapeHtml(viewingUser.name)}님이 공유한<br />포트폴리오 &amp; 자료 아카이브입니다.`;
-      workspaceHeroDesc.textContent = `이 공간은 읽기 전용으로 공유되었습니다. 카테고리와 작업물을 자유롭게 열람하고 첨부 문서를 다운로드할 수 있습니다.`;
+      workspaceHeroTitle.innerHTML = customTitle
+        ? escapeHtml(customTitle).replace(/\n/g, '<br />')
+        : `${escapeHtml(viewingUser.name)}님이 공유한<br />포트폴리오 &amp; 자료 아카이브입니다.`;
+      workspaceHeroDesc.textContent = customDesc || `이 공간은 읽기 전용으로 공유되었습니다. 카테고리와 작업물을 자유롭게 열람하고 첨부 문서를 다운로드할 수 있습니다.`;
     } else {
       workspaceOwnerBadge.textContent = `👤 ${viewingUser.name} (${viewingUser.id}) 전용 포트폴리오 & 아카이브`;
-      workspaceHeroTitle.innerHTML = `${escapeHtml(viewingUser.name)}님의 작업물과<br />기술 문서를 기록하는 고유 공간입니다.`;
-      workspaceHeroDesc.textContent = `상단의 '🔗 공유 & 계정 설정' 버튼에서 타인에게 읽기 전용 링크를 공유하거나 계정을 관리할 수 있습니다.`;
+      workspaceHeroTitle.innerHTML = customTitle
+        ? escapeHtml(customTitle).replace(/\n/g, '<br />')
+        : `${escapeHtml(viewingUser.name)}님의 작업물과<br />기술 문서를 기록하는 고유 공간입니다.`;
+      workspaceHeroDesc.textContent = customDesc || `상단의 '🔗 공유 & 계정 설정' 버튼에서 타인에게 읽기 전용 링크를 공유하거나 계정을 관리할 수 있습니다.`;
     }
     heroStats.classList.remove('hidden');
     workspaceLockedState.classList.add('hidden');
@@ -991,10 +1094,10 @@ function closeAuthModal() {
   }
 }
 
-// ==================== 공간 공유 & 계정 삭제 모달 ====================
-function openAccountSettingsModal() {
+// ==================== 공유 설정 전용 모달 로직 ====================
+function openShareSettingsModal() {
   if (!currentUser) {
-    openAuthModal('계정 설정은 로그인 후 이용할 수 있습니다.');
+    openAuthModal('공유 설정은 로그인 후 이용할 수 있습니다.');
     return;
   }
 
@@ -1006,6 +1109,63 @@ function openAccountSettingsModal() {
   shareUrlInput.value = buildShareUrlForUser(userObj.id);
   shareLinkArea.classList.toggle('hidden', !isShareOn);
   copyShareFeedback.textContent = '';
+
+  // 관리자(admin) 계정인 경우 지인 초대 코드 관리 상자 표시
+  if (inviteCodeManagerBox) {
+    if (userObj.id.toLowerCase() === 'admin') {
+      inviteCodeManagerBox.classList.remove('hidden');
+      if (manageInviteCodeInput) {
+        manageInviteCodeInput.value = getStoredInviteCode();
+      }
+      if (manageInviteFeedback) {
+        manageInviteFeedback.textContent = '';
+      }
+    } else {
+      inviteCodeManagerBox.classList.add('hidden');
+    }
+  }
+
+  shareSettingsModal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function closeShareSettingsModal() {
+  shareSettingsModal.classList.add('hidden');
+  if (
+    addModal.classList.contains('hidden') &&
+    detailModal.classList.contains('hidden') &&
+    categoryModal.classList.contains('hidden') &&
+    authModal.classList.contains('hidden') &&
+    exploreUsersModal.classList.contains('hidden') &&
+    accountSettingsModal.classList.contains('hidden')
+  ) {
+    document.body.style.overflow = '';
+  }
+}
+
+// ==================== 계정 설정 전용 모달 로직 ====================
+function openAccountSettingsModal() {
+  if (!currentUser) {
+    openAuthModal('계정 설정은 로그인 후 이용할 수 있습니다.');
+    return;
+  }
+
+  const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
+  if (!userObj) return;
+
+  // 프로필 표시 이름 입력 필드 초기화
+  if (editProfileNameInput) editProfileNameInput.value = userObj.name || '';
+  if (profileNameFeedback) profileNameFeedback.textContent = '';
+
+  // 인삿말 설정 폼 초기화
+  if (customHeroTitleInput) customHeroTitleInput.value = userObj.customHeroTitle || '';
+  if (customHeroDescInput) customHeroDescInput.value = userObj.customHeroDesc || '';
+  if (heroCustomFeedback) heroCustomFeedback.textContent = '';
+
+  // 비밀번호 변경 폼 초기화
+  if (changePasswordForm) changePasswordForm.reset();
+  if (changePwAlert) changePwAlert.classList.add('hidden');
+  if (changePwFeedback) changePwFeedback.textContent = '';
 
   deleteAccountForm.reset();
   deleteAccountAlert.classList.add('hidden');
@@ -1021,7 +1181,8 @@ function closeAccountSettingsModal() {
     detailModal.classList.contains('hidden') &&
     categoryModal.classList.contains('hidden') &&
     authModal.classList.contains('hidden') &&
-    exploreUsersModal.classList.contains('hidden')
+    exploreUsersModal.classList.contains('hidden') &&
+    shareSettingsModal.classList.contains('hidden')
   ) {
     document.body.style.overflow = '';
   }
@@ -1033,7 +1194,8 @@ async function deleteCurrentAccountPermanently(passwordInput) {
   if (userIdx === -1) return;
 
   const userObj = users[userIdx];
-  if (userObj.passwordHash !== hashPassword(passwordInput)) {
+  const isMatch = await verifyPassword(userObj, passwordInput);
+  if (!isMatch) {
     deleteAccountAlert.textContent = '비밀번호가 일치하지 않습니다.';
     deleteAccountAlert.classList.remove('hidden');
     return;
@@ -1286,9 +1448,14 @@ function renderCategoryManageList() {
               <span class="category-manage-sub">${escapeHtml(cat.coverLabel || '')} · 내 작업물 ${itemCount}개</span>
             </div>
           </div>
-          <button type="button" class="btn btn-danger-ghost btn-sm delete-cat-btn" data-cat-id="${escapeHtml(cat.id)}">
-            삭제
-          </button>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <button type="button" class="btn btn-secondary btn-sm edit-cat-btn" data-cat-id="${escapeHtml(cat.id)}">
+              수정
+            </button>
+            <button type="button" class="btn btn-danger-ghost btn-sm delete-cat-btn" data-cat-id="${escapeHtml(cat.id)}">
+              삭제
+            </button>
+          </div>
         </li>
       `;
     })
@@ -1310,19 +1477,57 @@ function updateCategoryPreviewCard() {
   }
 }
 
+function resetCategoryForm() {
+  editingCategoryId = null;
+  addCategoryForm.reset();
+  customCatIconDataUrl = null;
+  catColorInput.value = '#7c3aed';
+  catEmojiInput.value = '🎲';
+  if (catFormTitle) catFormTitle.textContent = '+ 새 카테고리 항목 추가';
+  if (catSubmitBtn) catSubmitBtn.textContent = '+ 카테고리 추가하기';
+  if (cancelEditCatBtn) cancelEditCatBtn.classList.add('hidden');
+  updateCategoryPreviewCard();
+}
+
+function startEditCategory(catId) {
+  const targetCat = categories.find((c) => c.id === catId);
+  if (!targetCat) return;
+
+  editingCategoryId = targetCat.id;
+  catNameInput.value = targetCat.label || '';
+  catSubInput.value = targetCat.coverLabel || '';
+  catColorInput.value = targetCat.color || '#7c3aed';
+
+  if (targetCat.iconType === 'image' && targetCat.iconValue) {
+    customCatIconDataUrl = targetCat.iconValue;
+    catEmojiInput.value = '';
+  } else {
+    customCatIconDataUrl = null;
+    catEmojiInput.value = targetCat.iconValue || '📁';
+  }
+
+  if (catFormTitle) catFormTitle.textContent = `✏️ '${targetCat.label}' 카테고리 수정`;
+  if (catSubmitBtn) catSubmitBtn.textContent = '✓ 카테고리 수정 완료';
+  if (cancelEditCatBtn) cancelEditCatBtn.classList.remove('hidden');
+
+  updateCategoryPreviewCard();
+  catNameInput.focus();
+}
+
 function openCategoryModal() {
   if (!isEditableWorkspace()) {
     alert('읽기 전용 공유 모드에서는 카테고리를 편집할 수 없습니다.');
     return;
   }
+  resetCategoryForm();
   renderCategoryManageList();
-  updateCategoryPreviewCard();
   categoryModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
 }
 
 function closeCategoryModal() {
   categoryModal.classList.add('hidden');
+  resetCategoryForm();
   if (
     addModal.classList.contains('hidden') &&
     detailModal.classList.contains('hidden') &&
@@ -1379,16 +1584,21 @@ async function openDetailModal(itemId) {
     .join('');
 
   if (item.links && item.links.length > 0) {
-    modalLinksSection.classList.remove('hidden');
-    modalLinks.innerHTML = item.links
-      .map(
-        (link) => `
-          <a href="${escapeHtml(link.url)}" target="_blank" rel="noopener noreferrer" class="modal-link-item">
-            <span>🔗 ${escapeHtml(link.label)}</span>
-          </a>
-        `
-      )
-      .join('');
+    const validLinks = item.links.filter((l) => sanitizeUrl(l.url));
+    if (validLinks.length > 0) {
+      modalLinksSection.classList.remove('hidden');
+      modalLinks.innerHTML = validLinks
+        .map(
+          (link) => `
+            <a href="${escapeHtml(sanitizeUrl(link.url))}" target="_blank" rel="noopener noreferrer nofollow" class="modal-link-item">
+              <span>🔗 ${escapeHtml(link.label)}</span>
+            </a>
+          `
+        )
+        .join('');
+    } else {
+      modalLinksSection.classList.add('hidden');
+    }
   } else {
     modalLinksSection.classList.add('hidden');
   }
@@ -1585,11 +1795,43 @@ function renderPendingFilesList() {
     .join('');
 }
 
+// 위험 파일 확장자 차단 (XSS 및 실행 파일 방지)
+const BLOCKED_FILE_EXTENSIONS = [
+  'exe', 'bat', 'cmd', 'vbs', 'vbe', 'js', 'jse', 'wsf', 'wsh', 'scr', 'pif', 'com',
+  'html', 'htm', 'xhtml', 'shtml', 'svg', 'php', 'asp', 'aspx', 'jsp', 'cgi', 'sh', 'bash'
+];
+
+function isSafeFile(file) {
+  if (!file || !file.name) return false;
+  const parts = file.name.split('.');
+  if (parts.length < 2) return true;
+  const ext = parts.pop().toLowerCase();
+  return !BLOCKED_FILE_EXTENSIONS.includes(ext);
+}
+
 function addFilesToPending(fileList) {
   const incoming = Array.from(fileList || []);
   if (incoming.length === 0) return;
-  pendingFiles.push(...incoming);
-  renderPendingFilesList();
+
+  const blocked = [];
+  const safe = [];
+
+  for (const f of incoming) {
+    if (isSafeFile(f)) {
+      safe.push(f);
+    } else {
+      blocked.push(f.name);
+    }
+  }
+
+  if (blocked.length > 0) {
+    alert(`보안상 실행 가능 파일 및 웹 스크립트 파일은 첨부할 수 없습니다:\n- ${blocked.join('\n- ')}`);
+  }
+
+  if (safe.length > 0) {
+    pendingFiles.push(...safe);
+    renderPendingFilesList();
+  }
 }
 
 function openAddModal() {
@@ -1657,13 +1899,17 @@ function initEvents() {
     renderExploreUsersList(e.target.value);
   });
 
-  // 상단 인증 상태바 이벤트 (로그인 / 공유 & 계정 설정 / 로그아웃)
+  // 상단 인증 상태바 이벤트 (로그인 / 공유 설정 / 계정 설정 / 로그아웃)
   authStatusBar.addEventListener('click', (e) => {
     if (e.target.closest('#open-auth-modal-btn')) {
       openAuthModal();
       return;
     }
-    if (e.target.closest('#open-share-settings-btn')) {
+    if (e.target.closest('#open-share-modal-btn')) {
+      openShareSettingsModal();
+      return;
+    }
+    if (e.target.closest('#open-account-settings-btn')) {
       openAccountSettingsModal();
       return;
     }
@@ -1694,8 +1940,18 @@ function initEvents() {
 
   closeAuthModalBtn.addEventListener('click', closeAuthModal);
 
-  // 공간 공유 설정 및 계정 삭제 모달 이벤트
+  // 공유 설정 전용 모달 이벤트
+  if (closeShareSettingsModalBtn) closeShareSettingsModalBtn.addEventListener('click', closeShareSettingsModal);
+  if (closeShareFooterBtn) closeShareFooterBtn.addEventListener('click', closeShareSettingsModal);
+  if (shareSettingsModal) {
+    shareSettingsModal.addEventListener('click', (e) => {
+      if (e.target === shareSettingsModal) closeShareSettingsModal();
+    });
+  }
+
+  // 계정 설정 전용 모달 이벤트
   closeAccountSettingsModalBtn.addEventListener('click', closeAccountSettingsModal);
+  if (closeAccountFooterBtn) closeAccountFooterBtn.addEventListener('click', closeAccountSettingsModal);
   accountSettingsModal.addEventListener('click', (e) => {
     if (e.target === accountSettingsModal) closeAccountSettingsModal();
   });
@@ -1737,27 +1993,202 @@ function initEvents() {
     await deleteCurrentAccountPermanently(pw);
   });
 
+  // 프로필 표시 이름 (닉네임) 변경
+  if (profileNameForm) {
+    profileNameForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
+      if (!userObj) return;
+
+      const newName = editProfileNameInput.value.trim();
+      if (newName.length < 1) {
+        if (profileNameFeedback) {
+          profileNameFeedback.style.color = '#dc2626';
+          profileNameFeedback.textContent = '이름을 최소 1글자 이상 입력해 주세요.';
+        }
+        return;
+      }
+
+      userObj.name = newName;
+      currentUser.name = newName;
+      if (viewingUser && viewingUser.id.toLowerCase() === currentUser.id.toLowerCase()) {
+        viewingUser.name = newName;
+      }
+      saveUsers();
+
+      if (profileNameFeedback) {
+        profileNameFeedback.style.color = '#059669';
+        profileNameFeedback.textContent = '✓ 표시 이름이 성공적으로 변경되었습니다!';
+      }
+      renderAuthStatusBar();
+      renderWorkspaceHeaderAndPermissions();
+    });
+  }
+
+  // 내 공간 헤더 인삿말 커스텀 저장
+  if (heroCustomForm) {
+    heroCustomForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
+      if (!userObj) return;
+
+      userObj.customHeroTitle = customHeroTitleInput.value.trim();
+      userObj.customHeroDesc = customHeroDescInput.value.trim();
+      saveUsers();
+
+      if (heroCustomFeedback) {
+        heroCustomFeedback.style.color = '#059669';
+        heroCustomFeedback.textContent = '✓ 내 공간 제목과 인삿말이 저장되었습니다!';
+      }
+      renderWorkspaceHeaderAndPermissions();
+    });
+  }
+
+  // 인삿말 기본 문구로 초기화
+  if (resetHeroCustomBtn) {
+    resetHeroCustomBtn.addEventListener('click', () => {
+      if (!currentUser) return;
+      const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
+      if (!userObj) return;
+
+      userObj.customHeroTitle = '';
+      userObj.customHeroDesc = '';
+      saveUsers();
+
+      if (customHeroTitleInput) customHeroTitleInput.value = '';
+      if (customHeroDescInput) customHeroDescInput.value = '';
+      if (heroCustomFeedback) {
+        heroCustomFeedback.style.color = '#2563eb';
+        heroCustomFeedback.textContent = '기본 인삿말로 복원되었습니다.';
+      }
+      renderWorkspaceHeaderAndPermissions();
+    });
+  }
+
+  // 현재 계정 비밀번호 변경
+  if (changePasswordForm) {
+    changePasswordForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+
+      const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
+      if (!userObj) return;
+
+      const currentPw = currentPwInput.value;
+      const newPw = newPwInput.value;
+      const newPwConfirm = newPwConfirmInput.value;
+
+      if (changePwAlert) changePwAlert.classList.add('hidden');
+      if (changePwFeedback) changePwFeedback.textContent = '';
+
+      const isCurrentMatch = await verifyPassword(userObj, currentPw);
+      if (!isCurrentMatch) {
+        if (changePwAlert) {
+          changePwAlert.textContent = '현재 비밀번호가 일치하지 않습니다.';
+          changePwAlert.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (newPw.length < 4) {
+        if (changePwAlert) {
+          changePwAlert.textContent = '새 비밀번호는 4자리 이상이어야 합니다.';
+          changePwAlert.classList.remove('hidden');
+        }
+        return;
+      }
+
+      if (newPw !== newPwConfirm) {
+        if (changePwAlert) {
+          changePwAlert.textContent = '새 비밀번호와 비밀번호 확인이 일치하지 않습니다.';
+          changePwAlert.classList.remove('hidden');
+        }
+        return;
+      }
+
+      userObj.passwordHash = await hashPassword(newPw);
+      saveUsers();
+
+      changePasswordForm.reset();
+      if (changePwFeedback) {
+        changePwFeedback.style.color = '#059669';
+        changePwFeedback.textContent = '✓ 비밀번호가 안전하게 변경되었습니다!';
+      }
+    });
+  }
+
+  // 지인 초대 코드 저장 이벤트 (관리자 전용)
+  if (saveInviteCodeBtn && manageInviteCodeInput) {
+    saveInviteCodeBtn.addEventListener('click', () => {
+      const val = manageInviteCodeInput.value.trim();
+      if (val.length < 3) {
+        if (manageInviteFeedback) {
+          manageInviteFeedback.style.color = '#dc2626';
+          manageInviteFeedback.textContent = '초대 코드는 최소 3자 이상이어야 합니다.';
+        }
+        return;
+      }
+      setStoredInviteCode(val);
+      if (manageInviteFeedback) {
+        manageInviteFeedback.style.color = '#059669';
+        manageInviteFeedback.textContent = '✓ 새 지인 초대 코드가 저장되었습니다!';
+      }
+    });
+  }
+
+  // 로그인 연속 실패 제한 (Brute-Force 방어)
+  let loginFailCount = 0;
+  let lockUntilTimestamp = 0;
+
   // 로그인 폼 제출 -> 해당 계정의 고유 워크스페이스로 전환
-  loginForm.addEventListener('submit', (e) => {
+  loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const now = Date.now();
+    if (lockUntilTimestamp > now) {
+      const remainSec = Math.ceil((lockUntilTimestamp - now) / 1000);
+      showAuthAlert(`보안을 위해 로그인이 일시 차단되었습니다. ${remainSec}초 후 다시 시도하세요.`);
+      return;
+    }
+
     const id = loginIdInput.value.trim();
     const pw = loginPwInput.value;
 
     const user = users.find((u) => u.id.toLowerCase() === id.toLowerCase());
-    if (!user || user.passwordHash !== hashPassword(pw)) {
-      showAuthAlert('아이디 또는 비밀번호가 일치하지 않습니다.');
+    const isMatch = await verifyPassword(user, pw);
+
+    if (!user || !isMatch) {
+      loginFailCount++;
+      if (loginFailCount >= 5) {
+        lockUntilTimestamp = Date.now() + 60 * 1000; // 60초 잠금
+        loginFailCount = 0;
+        showAuthAlert('연속 5회 로그인에 실패하여 보안을 위해 1분간 로그인이 제한됩니다.');
+      } else {
+        showAuthAlert(`아이디 또는 비밀번호가 일치하지 않습니다. (실패 ${loginFailCount}/5회)`);
+      }
       return;
     }
 
+    loginFailCount = 0;
+    lockUntilTimestamp = 0;
     const cb = pendingAuthCallback;
     closeAuthModal();
     setSessionAndSwitchWorkspace(user);
     if (typeof cb === 'function') cb();
   });
 
-  // 회원가입(새 사용자 등록) -> 새 계정의 독립된 고유 공간 생성 및 전환
-  signupForm.addEventListener('submit', (e) => {
+  // 회원가입(새 사용자 등록) -> 초대 코드 확인 후 새 계정의 독립된 고유 공간 생성 및 전환
+  signupForm.addEventListener('submit', async (e) => {
     e.preventDefault();
+    const inputInvite = inviteCodeInput ? inviteCodeInput.value.trim() : '';
+    const storedInvite = getStoredInviteCode();
+
+    if (!inputInvite || inputInvite !== storedInvite) {
+      showAuthAlert('가입 초대 코드가 일치하지 않습니다. 관리자에게 승인된 지인 초대 코드를 확인해 주세요.');
+      return;
+    }
+
     const id = signupIdInput.value.trim();
     const name = signupNameInput.value.trim();
     const pw = signupPwInput.value;
@@ -1771,8 +2202,8 @@ function initEvents() {
       showAuthAlert('이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요.');
       return;
     }
-    if (pw.length < 2) {
-      showAuthAlert('비밀번호는 2자리 이상 입력해 주세요.');
+    if (pw.length < 4) {
+      showAuthAlert('보안을 위해 비밀번호는 4자리 이상 입력해 주세요.');
       return;
     }
     if (pw !== pwConfirm) {
@@ -1780,10 +2211,11 @@ function initEvents() {
       return;
     }
 
+    const hashedPw = await hashPassword(pw);
     const newUser = {
       id,
       name,
-      passwordHash: hashPassword(pw),
+      passwordHash: hashedPw,
       shareEnabled: true
     };
 
@@ -1976,7 +2408,12 @@ function initEvents() {
     updateCategoryPreviewCard();
   });
 
-  // 새 카테고리 추가 제출 (편집 가능한 본인 공간에서만 허용)
+  // 카테고리 수정 취소 버튼
+  if (cancelEditCatBtn) {
+    cancelEditCatBtn.addEventListener('click', resetCategoryForm);
+  }
+
+  // 새 카테고리 추가 및 기존 카테고리 수정 제출
   addCategoryForm.addEventListener('submit', (e) => {
     e.preventDefault();
     if (!isEditableWorkspace()) return;
@@ -1989,31 +2426,60 @@ function initEvents() {
     const iconType = customCatIconDataUrl ? 'image' : 'emoji';
     const iconValue = customCatIconDataUrl || catEmojiInput.value.trim() || '📁';
 
-    const newCat = {
-      id: `cat-${Date.now()}`,
-      label,
-      coverLabel,
-      color,
-      iconType,
-      iconValue
-    };
+    if (editingCategoryId) {
+      // 기존 카테고리 수정
+      const catIdx = categories.findIndex((c) => c.id === editingCategoryId);
+      if (catIdx !== -1) {
+        categories[catIdx] = {
+          ...categories[catIdx],
+          label,
+          coverLabel,
+          color,
+          iconType,
+          iconValue
+        };
+      }
+      const targetId = editingCategoryId;
+      saveCategories();
+      resetCategoryForm();
+      renderCategoryManageList();
+      renderGallery();
+      renderCategorySelectOptions(targetId);
+    } else {
+      // 새 카테고리 추가
+      const newCat = {
+        id: `cat-${Date.now()}`,
+        label,
+        coverLabel,
+        color,
+        iconType,
+        iconValue
+      };
 
-    categories.push(newCat);
-    saveCategories();
-
-    catNameInput.value = '';
-    catSubInput.value = '';
-    customCatIconDataUrl = null;
-    updateCategoryPreviewCard();
-    renderCategoryManageList();
-    renderGallery();
-    renderCategorySelectOptions(newCat.id);
+      categories.push(newCat);
+      saveCategories();
+      resetCategoryForm();
+      renderCategoryManageList();
+      renderGallery();
+      renderCategorySelectOptions(newCat.id);
+    }
   });
 
-  // 카테고리 삭제 (편집 가능한 본인 공간에서만 허용)
+  // 카테고리 목록 내 수정 / 삭제 클릭 이벤트
   categoryManageList.addEventListener('click', (e) => {
+    if (!isEditableWorkspace()) return;
+
+    // 수정 버튼 클릭
+    const editBtn = e.target.closest('.edit-cat-btn');
+    if (editBtn) {
+      const catId = editBtn.dataset.catId;
+      startEditCategory(catId);
+      return;
+    }
+
+    // 삭제 버튼 클릭
     const delBtn = e.target.closest('.delete-cat-btn');
-    if (!delBtn || !isEditableWorkspace()) return;
+    if (!delBtn) return;
 
     const catId = delBtn.dataset.catId;
     const targetCat = categories.find((c) => c.id === catId);
@@ -2026,6 +2492,9 @@ function initEvents() {
         : `'${targetCat.label}' 카테고리를 내 공간에서 삭제하시겠습니까?`;
 
     if (confirm(msg)) {
+      if (editingCategoryId === catId) {
+        resetCategoryForm();
+      }
       categories = categories.filter((c) => c.id !== catId);
       saveCategories();
       renderCategoryManageList();
@@ -2135,6 +2604,10 @@ function initEvents() {
     if (e.key === 'Escape') {
       if (!exploreUsersModal.classList.contains('hidden')) {
         closeExploreUsersModal();
+        return;
+      }
+      if (!shareSettingsModal.classList.contains('hidden')) {
+        closeShareSettingsModal();
         return;
       }
       if (!accountSettingsModal.classList.contains('hidden')) {

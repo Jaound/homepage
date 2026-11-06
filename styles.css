@@ -292,18 +292,19 @@ body {
   align-items: center;
   gap: 12px;
   flex: 1;
-  max-width: 440px;
+  max-width: 580px;
   justify-content: flex-end;
 }
 
 .search-box {
   position: relative;
   flex: 1;
+  min-width: 260px;
 }
 
 .search-icon {
   position: absolute;
-  left: 12px;
+  left: 14px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-muted);
@@ -312,7 +313,7 @@ body {
 
 .search-box input {
   width: 100%;
-  padding: 10px 14px 10px 38px;
+  padding: 10px 16px 10px 42px;
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background-color: var(--bg-surface);
@@ -320,6 +321,10 @@ body {
   font-size: 0.9rem;
   color: var(--text-primary);
   outline: none;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -329,7 +334,7 @@ body {
 }
 
 .sort-select {
-  padding: 10px 12px;
+  padding: 10px 36px 10px 14px;
   border: 1px solid var(--border-color);
   border-radius: 10px;
   background-color: var(--bg-surface);
@@ -339,6 +344,18 @@ body {
   font-weight: 500;
   cursor: pointer;
   outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.sort-select:hover {
+  border-color: var(--border-hover);
 }
 
 .results-meta {
