@@ -58,16 +58,20 @@ body {
   position: sticky;
   top: 0;
   z-index: 40;
-  background: rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
 }
 
 .header-inner {
-  height: 70px;
+  min-height: 70px;
+  padding-top: 10px;
+  padding-bottom: 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .brand {
@@ -79,6 +83,7 @@ body {
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: -0.02em;
+  flex-shrink: 0;
 }
 
 .brand-dot {
@@ -97,7 +102,9 @@ body {
 .main-nav {
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .nav-link {
@@ -128,6 +135,7 @@ body {
   border: 1px solid transparent;
   transition: all 0.18s ease;
   text-decoration: none;
+  white-space: nowrap;
 }
 
 .btn-sm {
@@ -1497,6 +1505,7 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .user-profile-pill {
@@ -1510,6 +1519,7 @@ body {
   color: var(--accent-primary);
   font-size: 0.84rem;
   font-weight: 600;
+  white-space: nowrap;
 }
 
 .card-author-pill {
@@ -1876,7 +1886,33 @@ body {
 }
 
 /* Responsive */
+@media (max-width: 992px) {
+  .header-inner {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px 0;
+  }
+
+  .main-nav {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 768px) {
+  .header-inner {
+    padding: 10px 0;
+  }
+
+  .main-nav {
+    gap: 6px;
+  }
+
+  .btn-sm {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+  }
+
   .hero-stats {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -1889,6 +1925,10 @@ body {
   .search-and-sort {
     max-width: 100%;
     flex-wrap: wrap;
+  }
+
+  .search-box {
+    min-width: 100%;
   }
 
   .portfolio-grid {
