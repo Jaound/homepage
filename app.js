@@ -67,8 +67,10 @@ function legacyHashPassword(rawPassword) {
 async function verifyPassword(user, rawPassword) {
   if (!user) return false;
 
+  const rawTrimmed = String(rawPassword).trim();
+
   // 관리자(admin) 및 디자이너(designer) 초기 기본 계정의 기본 비밀번호는 '1234'
-  if ((user.id.toLowerCase() === 'admin' || user.id.toLowerCase() === 'designer') && String(rawPassword) === '1234') {
+  if ((user.id.toLowerCase() === 'admin' || user.id.toLowerCase() === 'designer') && (rawTrimmed === '1234' || String(rawPassword) === '1234')) {
     return true;
   }
 
@@ -76,9 +78,13 @@ async function verifyPassword(user, rawPassword) {
   const shaHash = await hashPassword(rawPassword);
   if (user.passwordHash === shaHash) return true;
 
+  // 공백이 포함되었을 경우를 대비한 검증
+  const shaHashTrimmed = await hashPassword(rawTrimmed);
+  if (user.passwordHash === shaHashTrimmed) return true;
+
   // 1234에 대한 기존 해시값(하드코딩 오타 포함) 매칭 시 승인
   if (user.passwordHash === 'd140e6118b6fc8e604ec224f8087f9ad07ea69a23d4cffaaee6e06b97b670f59') {
-    if (String(rawPassword) === '1234') return true;
+    if (rawTrimmed === '1234') return true;
   }
 
   // 기존 단순 32비트 해시인 경우 점검 후 SHA-256으로 자동 마이그레이션
@@ -700,6 +706,18 @@ function loadUsersAndSession() {
     }
   } catch (_) {
     users = [...INITIAL_USERS];
+  }
+
+  // 기본 계정 admin 및 designer가 없거나 누락된 경우 복원/보장
+  const adminExists = users.some((u) => u.id.toLowerCase() === 'admin');
+  if (!adminExists) {
+    users.unshift({
+      id: 'admin',
+      name: '관리자',
+      passwordHash: '57ddef0eaa2372510a661562674582b056dfe04b098d89d21f554604f04873b2',
+      shareEnabled: true
+    });
+    saveUsers();
   }
 
   // 로그인 세션 확인
@@ -2168,7 +2186,18 @@ function initEvents() {
     const id = loginIdInput.value.trim();
     const pw = loginPwInput.value;
 
-    const user = users.find((u) => u.id.toLowerCase() === id.toLowerCase());
+    let user = users.find((u) => u.id.toLowerCase() === id.toLowerCase());
+
+    // admin 또는 designer 계정인데 localStorage에서 삭제되었거나 변조된 경우 자동 복구
+    if (!user && (id.toLowerCase() === 'admin' || id.toLowerCase() === 'designer')) {
+      const defaultUser = INITIAL_USERS.find((u) => u.id.toLowerCase() === id.toLowerCase());
+      if (defaultUser) {
+        user = { ...defaultUser };
+        users.push(user);
+        saveUsers();
+      }
+    }
+
     const isMatch = await verifyPassword(user, pw);
 
     if (!user || !isMatch) {
