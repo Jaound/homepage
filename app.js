@@ -1198,11 +1198,13 @@ function openAccountSettingsModal() {
   if (changePwAlert) changePwAlert.classList.add('hidden');
   if (changePwFeedback) changePwFeedback.textContent = '';
 
-  deleteAccountForm.reset();
-  deleteAccountAlert.classList.add('hidden');
+  if (deleteAccountForm) deleteAccountForm.reset();
+  if (deleteAccountAlert) deleteAccountAlert.classList.add('hidden');
 
-  accountSettingsModal.classList.remove('hidden');
-  document.body.style.overflow = 'hidden';
+  if (accountSettingsModal) {
+    accountSettingsModal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
 }
 
 function closeAccountSettingsModal() {
@@ -1227,8 +1229,12 @@ async function deleteCurrentAccountPermanently(passwordInput) {
   const userObj = users[userIdx];
   const isMatch = await verifyPassword(userObj, passwordInput);
   if (!isMatch) {
-    deleteAccountAlert.textContent = '비밀번호가 일치하지 않습니다.';
-    deleteAccountAlert.classList.remove('hidden');
+    if (deleteAccountAlert) {
+      deleteAccountAlert.textContent = '비밀번호가 일치하지 않습니다.';
+      deleteAccountAlert.classList.remove('hidden');
+    } else {
+      alert('비밀번호가 일치하지 않습니다.');
+    }
     return;
   }
 
@@ -1981,48 +1987,62 @@ function initEvents() {
   }
 
   // 계정 설정 전용 모달 이벤트
-  closeAccountSettingsModalBtn.addEventListener('click', closeAccountSettingsModal);
+  if (closeAccountSettingsModalBtn) closeAccountSettingsModalBtn.addEventListener('click', closeAccountSettingsModal);
   if (closeAccountFooterBtn) closeAccountFooterBtn.addEventListener('click', closeAccountSettingsModal);
-  accountSettingsModal.addEventListener('click', (e) => {
-    if (e.target === accountSettingsModal) closeAccountSettingsModal();
-  });
+  if (accountSettingsModal) {
+    accountSettingsModal.addEventListener('click', (e) => {
+      if (e.target === accountSettingsModal) closeAccountSettingsModal();
+    });
+  }
 
-  shareAllowCheckbox.addEventListener('change', () => {
-    if (!currentUser) return;
-    const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
-    if (!userObj) return;
+  if (shareAllowCheckbox) {
+    shareAllowCheckbox.addEventListener('change', () => {
+      if (!currentUser) return;
+      const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
+      if (!userObj) return;
 
-    userObj.shareEnabled = shareAllowCheckbox.checked;
-    saveUsers();
-    shareLinkArea.classList.toggle('hidden', !userObj.shareEnabled);
-    copyShareFeedback.textContent = userObj.shareEnabled
-      ? '공유가 활성화되었습니다.'
-      : '공유가 비활성화되었습니다.';
-  });
+      userObj.shareEnabled = shareAllowCheckbox.checked;
+      saveUsers();
+      if (shareLinkArea) shareLinkArea.classList.toggle('hidden', !userObj.shareEnabled);
+      if (copyShareFeedback) {
+        copyShareFeedback.textContent = userObj.shareEnabled
+          ? '공유가 활성화되었습니다.'
+          : '공유가 비활성화되었습니다.';
+      }
+    });
+  }
 
-  copyShareUrlBtn.addEventListener('click', async () => {
-    const url = shareUrlInput.value;
-    try {
-      await navigator.clipboard.writeText(url);
-      copyShareFeedback.textContent = '✓ 읽기 전용 공유 링크가 복사되었습니다!';
-    } catch (_) {
-      shareUrlInput.select();
-      document.execCommand('copy');
-      copyShareFeedback.textContent = '✓ 읽기 전용 공유 링크가 복사되었습니다!';
-    }
-  });
+  if (copyShareUrlBtn) {
+    copyShareUrlBtn.addEventListener('click', async () => {
+      const url = shareUrlInput ? shareUrlInput.value : '';
+      try {
+        await navigator.clipboard.writeText(url);
+        if (copyShareFeedback) copyShareFeedback.textContent = '✓ 읽기 전용 공유 링크가 복사되었습니다!';
+      } catch (_) {
+        if (shareUrlInput) {
+          shareUrlInput.select();
+          document.execCommand('copy');
+        }
+        if (copyShareFeedback) copyShareFeedback.textContent = '✓ 읽기 전용 공유 링크가 복사되었습니다!';
+      }
+    });
+  }
 
-  previewReadonlyBtn.addEventListener('click', () => {
-    if (!currentUser) return;
-    closeAccountSettingsModal();
-    enterReadOnlySharedSpace(currentUser.id);
-  });
+  if (previewReadonlyBtn) {
+    previewReadonlyBtn.addEventListener('click', () => {
+      if (!currentUser) return;
+      closeAccountSettingsModal();
+      enterReadOnlySharedSpace(currentUser.id);
+    });
+  }
 
-  deleteAccountForm.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const pw = deleteAccountPwInput.value;
-    await deleteCurrentAccountPermanently(pw);
-  });
+  if (deleteAccountForm) {
+    deleteAccountForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const pw = deleteAccountPwInput ? deleteAccountPwInput.value : '';
+      await deleteCurrentAccountPermanently(pw);
+    });
+  }
 
   // 프로필 표시 이름 (닉네임) 변경
   if (profileNameForm) {
