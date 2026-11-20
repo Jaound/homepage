@@ -277,6 +277,8 @@ let activeCategory = 'all';
 let searchQuery = '';
 let sortOrder = 'newest';
 let selectedItemId = null;
+let editingItemId = null; // 현재 수정 중인 개별 항목 ID (null이면 신규 등록 모드)
+let editingExistingAttachments = []; // 수정 중인 항목의 기존 첨부파일 목록
 let pendingFiles = [];
 let activeObjectUrls = [];
 let editingCategoryId = null; // 현재 수정 중인 카테고리 ID (null이면 신규 등록 모드)
@@ -312,6 +314,7 @@ const resetFilterBtn = document.getElementById('reset-filter-btn');
 const detailModal = document.getElementById('detail-modal');
 const closeDetailModalBtn = document.getElementById('close-detail-modal');
 const closeDetailFooterBtn = document.getElementById('close-detail-footer-btn');
+const editItemBtn = document.getElementById('edit-item-btn');
 const deleteItemBtn = document.getElementById('delete-item-btn');
 const deletePermissionHint = document.getElementById('delete-permission-hint');
 const modalBanner = document.getElementById('modal-banner');
@@ -335,16 +338,21 @@ const modalTags = document.getElementById('modal-tags');
 const modalLinksSection = document.getElementById('modal-links-section');
 const modalLinks = document.getElementById('modal-links');
 
-// 항목 추가 모달 요소
+// 항목 추가 및 수정 모달 요소
 const addModal = document.getElementById('add-modal');
+const addModalTitle = document.getElementById('add-modal-title');
+const addModalDesc = document.getElementById('add-modal-desc');
 const openAddModalBtn = document.getElementById('open-add-modal-btn');
 const closeAddModalBtn = document.getElementById('close-add-modal');
 const cancelAddBtn = document.getElementById('cancel-add-btn');
+const submitAddBtn = document.getElementById('submit-add-btn');
 const addItemForm = document.getElementById('add-item-form');
 const itemCategorySelect = document.getElementById('item-category');
 const openCatFromAddBtn = document.getElementById('open-cat-from-add-btn');
 const fileDropZone = document.getElementById('file-drop-zone');
 const fileInput = document.getElementById('item-files');
+const existingFilesContainer = document.getElementById('existing-files-container');
+const existingFilesList = document.getElementById('existing-files-list');
 const selectedFilesList = document.getElementById('selected-files-list');
 
 // 카테고리 관리 모달 요소
@@ -1597,14 +1605,18 @@ async function openDetailModal(itemId) {
   modalSubtitle.textContent = item.summary;
   modalDescription.textContent = item.description;
 
-  // 읽기 전용 공유 모드일 경우 삭제 버튼 숨김 및 안내 표시
+  // 읽기 전용 공유 모드일 경우 수정/삭제 버튼 숨김 및 안내 표시
   if (isEditableWorkspace()) {
-    deleteItemBtn.classList.remove('hidden');
-    deletePermissionHint.classList.add('hidden');
+    if (editItemBtn) editItemBtn.classList.remove('hidden');
+    if (deleteItemBtn) deleteItemBtn.classList.remove('hidden');
+    if (deletePermissionHint) deletePermissionHint.classList.add('hidden');
   } else {
-    deleteItemBtn.classList.add('hidden');
-    deletePermissionHint.classList.remove('hidden');
-    deletePermissionHint.textContent = '🔒 읽기 전용 공유 공간이므로 편집 및 삭제할 수 없습니다';
+    if (editItemBtn) editItemBtn.classList.add('hidden');
+    if (deleteItemBtn) deleteItemBtn.classList.add('hidden');
+    if (deletePermissionHint) {
+      deletePermissionHint.classList.remove('hidden');
+      deletePermissionHint.textContent = '🔒 읽기 전용 공유 공간이므로 편집 및 삭제할 수 없습니다';
+    }
   }
 
   if (item.highlights && item.highlights.length > 0) {
@@ -1871,11 +1883,47 @@ function addFilesToPending(fileList) {
   }
 }
 
+function renderExistingFilesList() {
+  if (!existingFilesContainer || !existingFilesList) return;
+  if (!editingExistingAttachments || editingExistingAttachments.length === 0) {
+    existingFilesContainer.classList.add('hidden');
+    existingFilesList.innerHTML = '';
+    return;
+  }
+  existingFilesContainer.classList.remove('hidden');
+  existingFilesList.innerHTML = editingExistingAttachments
+    .map((att, idx) => {
+      const badge = att.kind === 'video' ? '🎬 영상' : att.kind === 'image' ? '🖼️ 이미지' : '📄 문서';
+      return `
+        <li class="selected-file-item">
+          <div class="selected-file-name">
+            <strong>[${badge}]</strong> ${escapeHtml(att.name)}
+            ${att.size ? `<span class="selected-file-meta">(${formatFileSize(att.size)})</span>` : ''}
+          </div>
+          <button type="button" class="remove-file-btn remove-existing-file-btn" data-index="${idx}" title="첨부파일 삭제">&times;</button>
+        </li>
+      `;
+    })
+    .join('');
+}
+
 function openAddModal() {
   if (!isEditableWorkspace()) {
     alert('읽기 전용 공유 모드에서는 새 작업물을 등록할 수 없습니다.');
     return;
   }
+  editingItemId = null;
+  editingExistingAttachments = [];
+
+  if (addModalTitle) addModalTitle.textContent = '새 작업물 / 자료 등록';
+  if (addModalDesc) addModalDesc.textContent = '포트폴리오 프로젝트, 시연 영상, 또는 보관할 문서 파일을 함께 등록합니다.';
+  if (submitAddBtn) {
+    submitAddBtn.disabled = false;
+    submitAddBtn.textContent = '등록하기';
+  }
+  if (existingFilesContainer) existingFilesContainer.classList.add('hidden');
+  if (existingFilesList) existingFilesList.innerHTML = '';
+
   addItemForm.reset();
   pendingFiles = [];
   renderPendingFilesList();
@@ -1884,7 +1932,68 @@ function openAddModal() {
   const now = new Date();
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, '0');
-  document.getElementById('item-date').value = `${yyyy}.${mm}`;
+  const dateEl = document.getElementById('item-date');
+  if (dateEl) dateEl.value = `${yyyy}.${mm}`;
+
+  addModal.classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+function openEditItemModal(itemId) {
+  if (!isEditableWorkspace()) {
+    alert('읽기 전용 공유 모드에서는 항목을 수정할 수 없습니다.');
+    return;
+  }
+  const item = items.find((i) => i.id === itemId);
+  if (!item) return;
+
+  // 상세 모달 닫기
+  closeDetailModal();
+
+  editingItemId = item.id;
+  editingExistingAttachments = Array.isArray(item.attachments) ? item.attachments.map((a) => ({ ...a })) : [];
+
+  if (addModalTitle) addModalTitle.textContent = '작업물 / 자료 수정';
+  if (addModalDesc) addModalDesc.textContent = '등록된 프로젝트 정보, 아카이브 설명, 첨부파일 및 링크를 수정합니다.';
+  if (submitAddBtn) {
+    submitAddBtn.disabled = false;
+    submitAddBtn.textContent = '수정 완료';
+  }
+
+  addItemForm.reset();
+  renderCategorySelectOptions(item.category);
+  if (itemCategorySelect) itemCategorySelect.value = item.category;
+
+  const dateEl = document.getElementById('item-date');
+  if (dateEl) dateEl.value = item.date || '';
+
+  const titleEl = document.getElementById('item-title');
+  if (titleEl) titleEl.value = item.title || '';
+
+  const summaryEl = document.getElementById('item-summary');
+  if (summaryEl) summaryEl.value = item.summary || '';
+
+  const descEl = document.getElementById('item-description');
+  if (descEl) descEl.value = item.description || '';
+
+  const hlEl = document.getElementById('item-highlights');
+  if (hlEl) hlEl.value = (item.highlights || []).join('\n');
+
+  const videoEl = document.getElementById('item-video-url');
+  if (videoEl) videoEl.value = item.videoUrl || '';
+
+  const tagsEl = document.getElementById('item-tags');
+  if (tagsEl) tagsEl.value = (item.tags || []).join(', ');
+
+  const linkObj = (item.links && item.links[0]) || { label: '', url: '' };
+  const linkLabelEl = document.getElementById('item-link-label');
+  if (linkLabelEl) linkLabelEl.value = linkObj.label || '';
+  const linkUrlEl = document.getElementById('item-link-url');
+  if (linkUrlEl) linkUrlEl.value = linkObj.url || '';
+
+  pendingFiles = [];
+  renderPendingFilesList();
+  renderExistingFilesList();
 
   addModal.classList.remove('hidden');
   document.body.style.overflow = 'hidden';
@@ -1893,8 +2002,12 @@ function openAddModal() {
 function closeAddModal() {
   addModal.classList.add('hidden');
   document.body.style.overflow = '';
+  editingItemId = null;
+  editingExistingAttachments = [];
   pendingFiles = [];
   renderPendingFilesList();
+  if (existingFilesContainer) existingFilesContainer.classList.add('hidden');
+  if (existingFilesList) existingFilesList.innerHTML = '';
 }
 
 // ==================== 이벤트 리스너 등록 ====================
@@ -2382,62 +2495,91 @@ function initEvents() {
     if (e.target === detailModal) closeDetailModal();
   });
 
-  // 항목 삭제 (편집 권한이 있는 본인 공간에서만 허용)
-  deleteItemBtn.addEventListener('click', async () => {
-    if (!selectedItemId || !isEditableWorkspace()) {
-      alert('읽기 전용 공유 상태에서는 항목을 삭제할 수 없습니다.');
-      return;
-    }
-    const target = items.find((i) => i.id === selectedItemId);
-    if (!target) return;
-
-    if (confirm(`'${target.title}' 항목과 첨부된 파일을 모두 삭제하시겠습니까?`)) {
-      for (const att of target.attachments || []) {
-        if (!att.inlineContent) {
-          await deleteAttachmentBlob(att.id);
-        }
+  // 항목 수정 (편집 권한이 있는 본인 공간에서만 허용)
+  if (editItemBtn) {
+    editItemBtn.addEventListener('click', () => {
+      if (!selectedItemId || !isEditableWorkspace()) {
+        alert('읽기 전용 공유 상태에서는 항목을 수정할 수 없습니다.');
+        return;
       }
-      items = items.filter((i) => i.id !== selectedItemId);
-      saveItems();
-      closeDetailModal();
-      renderGallery();
-    }
-  });
+      openEditItemModal(selectedItemId);
+    });
+  }
+
+  // 항목 삭제 (편집 권한이 있는 본인 공간에서만 허용)
+  if (deleteItemBtn) {
+    deleteItemBtn.addEventListener('click', async () => {
+      if (!selectedItemId || !isEditableWorkspace()) {
+        alert('읽기 전용 공유 상태에서는 항목을 삭제할 수 없습니다.');
+        return;
+      }
+      const target = items.find((i) => i.id === selectedItemId);
+      if (!target) return;
+
+      if (confirm(`'${target.title}' 항목과 첨부된 파일을 모두 삭제하시겠습니까?`)) {
+        for (const att of target.attachments || []) {
+          if (!att.inlineContent) {
+            await deleteAttachmentBlob(att.id);
+          }
+        }
+        items = items.filter((i) => i.id !== selectedItemId);
+        saveItems();
+        closeDetailModal();
+        renderGallery();
+      }
+    });
+  }
 
   // 파일 드롭존 클릭 & 드래그 앤 드롭
-  fileDropZone.addEventListener('click', () => fileInput.click());
+  if (fileDropZone && fileInput) {
+    fileDropZone.addEventListener('click', () => fileInput.click());
 
-  fileInput.addEventListener('change', (e) => {
-    addFilesToPending(e.target.files);
-    fileInput.value = '';
-  });
+    fileInput.addEventListener('change', (e) => {
+      addFilesToPending(e.target.files);
+      fileInput.value = '';
+    });
 
-  fileDropZone.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    fileDropZone.classList.add('dragover');
-  });
+    fileDropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      fileDropZone.classList.add('dragover');
+    });
 
-  fileDropZone.addEventListener('dragleave', () => {
-    fileDropZone.classList.remove('dragover');
-  });
+    fileDropZone.addEventListener('dragleave', () => {
+      fileDropZone.classList.remove('dragover');
+    });
 
-  fileDropZone.addEventListener('drop', (e) => {
-    e.preventDefault();
-    fileDropZone.classList.remove('dragover');
-    if (e.dataTransfer && e.dataTransfer.files) {
-      addFilesToPending(e.dataTransfer.files);
-    }
-  });
+    fileDropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      fileDropZone.classList.remove('dragover');
+      if (e.dataTransfer && e.dataTransfer.files) {
+        addFilesToPending(e.dataTransfer.files);
+      }
+    });
+  }
 
-  selectedFilesList.addEventListener('click', (e) => {
-    const removeBtn = e.target.closest('.remove-file-btn');
-    if (!removeBtn) return;
-    const index = Number(removeBtn.dataset.index);
-    if (!Number.isNaN(index)) {
-      pendingFiles.splice(index, 1);
-      renderPendingFilesList();
-    }
-  });
+  if (existingFilesList) {
+    existingFilesList.addEventListener('click', (e) => {
+      const removeBtn = e.target.closest('.remove-existing-file-btn');
+      if (!removeBtn) return;
+      const index = Number(removeBtn.dataset.index);
+      if (!Number.isNaN(index) && editingExistingAttachments[index]) {
+        editingExistingAttachments.splice(index, 1);
+        renderExistingFilesList();
+      }
+    });
+  }
+
+  if (selectedFilesList) {
+    selectedFilesList.addEventListener('click', (e) => {
+      const removeBtn = e.target.closest('.remove-file-btn');
+      if (!removeBtn) return;
+      const index = Number(removeBtn.dataset.index);
+      if (!Number.isNaN(index)) {
+        pendingFiles.splice(index, 1);
+        renderPendingFilesList();
+      }
+    });
+  }
 
   // 새 항목 등록 모달 열기/닫기
   openAddModalBtn.addEventListener('click', openAddModal);
@@ -2589,17 +2731,19 @@ function initEvents() {
     }
   });
 
-  // 새 작업물/자료 폼 제출 (편집 가능한 본인 공간에서만 허용)
+  // 새 작업물/자료 폼 제출 (등록 및 수정 공용, 편집 가능한 본인 공간에서만 허용)
   addItemForm.addEventListener('submit', async (e) => {
     e.preventDefault();
     if (!isEditableWorkspace()) {
-      alert('읽기 전용 공유 모드에서는 작업물을 등록할 수 없습니다.');
+      alert('읽기 전용 공유 모드에서는 작업물을 저장할 수 없습니다.');
       return;
     }
 
-    const submitBtn = document.getElementById('submit-add-btn');
-    submitBtn.disabled = true;
-    submitBtn.textContent = '저장 중...';
+    const submitBtn = submitAddBtn || document.getElementById('submit-add-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = '저장 중...';
+    }
 
     try {
       const category = itemCategorySelect.value;
@@ -2639,31 +2783,68 @@ function initEvents() {
         });
       }
 
-      const newItem = {
-        id: `item-${Date.now()}`,
-        category,
-        date,
-        authorId: currentUser.id,
-        authorName: currentUser.name,
-        title,
-        summary,
-        description,
-        highlights,
-        videoUrl,
-        attachments: savedAttachments,
-        tags,
-        links
-      };
+      if (editingItemId) {
+        // ========== 항목 수정 모드 ==========
+        const target = items.find((i) => i.id === editingItemId);
+        if (!target) {
+          alert('수정하려는 항목을 찾을 수 없습니다.');
+          return;
+        }
 
-      items.unshift(newItem);
-      saveItems();
-      closeAddModal();
-      renderGallery();
+        // 삭제된 기존 첨부파일의 IndexedDB Blob 정리
+        const keptIds = new Set(editingExistingAttachments.map((a) => a.id));
+        for (const oldAtt of target.attachments || []) {
+          if (!keptIds.has(oldAtt.id) && !oldAtt.inlineContent) {
+            await deleteAttachmentBlob(oldAtt.id);
+          }
+        }
+
+        target.category = category;
+        target.date = date;
+        target.title = title;
+        target.summary = summary;
+        target.description = description;
+        target.highlights = highlights;
+        target.videoUrl = videoUrl;
+        target.tags = tags;
+        target.links = links;
+        target.attachments = [...editingExistingAttachments, ...savedAttachments];
+
+        saveItems();
+        renderGallery();
+        const updatedId = target.id;
+        closeAddModal();
+        openDetailModal(updatedId);
+      } else {
+        // ========== 신규 등록 모드 ==========
+        const newItem = {
+          id: `item-${Date.now()}`,
+          category,
+          date,
+          authorId: currentUser.id,
+          authorName: currentUser.name,
+          title,
+          summary,
+          description,
+          highlights,
+          videoUrl,
+          attachments: savedAttachments,
+          tags,
+          links
+        };
+
+        items.unshift(newItem);
+        saveItems();
+        closeAddModal();
+        renderGallery();
+      }
     } catch (err) {
       alert('파일 저장 중 오류가 발생했습니다: ' + err.message);
     } finally {
-      submitBtn.disabled = false;
-      submitBtn.textContent = '등록하기';
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = editingItemId ? '수정 완료' : '등록하기';
+      }
     }
   });
 
