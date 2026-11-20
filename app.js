@@ -2220,6 +2220,31 @@ function initEvents() {
     if (typeof cb === 'function') cb();
   });
 
+  // admin 계정 긴급 복원 및 초기화 버튼 이벤트
+  const resetAccountAuthBtn = document.getElementById('reset-account-auth-btn');
+  if (resetAccountAuthBtn) {
+    resetAccountAuthBtn.addEventListener('click', async () => {
+      loginFailCount = 0;
+      lockUntilTimestamp = 0;
+      const hashed1234 = await hashPassword('1234');
+      const adminIdx = users.findIndex((u) => u.id.toLowerCase() === 'admin');
+      if (adminIdx !== -1) {
+        users[adminIdx].passwordHash = hashed1234;
+      } else {
+        users.unshift({
+          id: 'admin',
+          name: '관리자',
+          passwordHash: hashed1234,
+          shareEnabled: true
+        });
+      }
+      saveUsers();
+      loginIdInput.value = 'admin';
+      loginPwInput.value = '1234';
+      showAuthAlert('✓ admin 계정 비밀번호가 1234로 초기화되었습니다! [로그인] 버튼을 눌러주세요.');
+    });
+  }
+
   // 회원가입(새 사용자 등록) -> 초대 코드 확인 후 새 계정의 독립된 고유 공간 생성 및 전환
   signupForm.addEventListener('submit', async (e) => {
     e.preventDefault();
