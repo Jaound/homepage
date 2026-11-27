@@ -15,6 +15,184 @@ const IDB_NAME = 'PortfolioArchiveDB';
 const IDB_VERSION = 1;
 const IDB_STORE = 'attachments';
 
+// ==================== Supabase 클라우드 실시간 동기화 설정 ====================
+const SUPABASE_URL = 'https://txgnreadbaprnacxjrth.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_XCDhjVUZa7hIxf0qdOGbpg_W2dWCrd3';
+const SUPABASE_BUCKET = 'portfolio-files';
+
+let isCloudConnected = false;
+let cloudItemsByUser = {}; // { [userIdLower]: Item[] }
+
+async function sbRest(path, options = {}) {
+  const { method = 'GET', body, prefer } = options;
+  const headers = {
+    apikey: SUPABASE_KEY
+  };
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (prefer) {
+    headers['Prefer'] = prefer;
+  }
+
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Supabase REST ${res.status}: ${errText}`);
+  }
+  const text = await res.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function getSafeStoragePath(ownerId, attId, fileName) {
+  const extMatch = String(fileName || '').match(/(\.[a-zA-Z0-9]{1,10})$/);
+  const ext = extMatch ? extMatch[1].toLowerCase() : '';
+  const safeOwner = String(ownerId || 'shared').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  return `${safeOwner}/${attId}${ext}`;
+}
+
+async function sbUploadFile(storagePath, file) {
+  const res = await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}/${storagePath}`, {
+    method: 'POST',
+    headers: {
+      apikey: SUPABASE_KEY,
+      'Content-Type': file.type || 'application/octet-stream',
+      'x-upsert': 'true'
+    },
+    body: file
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Supabase Storage Upload ${res.status}: ${errText}`);
+  }
+  return `${SUPABASE_URL}/storage/v1/object/public/${SUPABASE_BUCKET}/${storagePath}`;
+}
+
+async function sbDeleteFile(storagePath) {
+  if (!storagePath) return;
+  try {
+    await fetch(`${SUPABASE_URL}/storage/v1/object/${SUPABASE_BUCKET}`, {
+      method: 'DELETE',
+      headers: {
+        apikey: SUPABASE_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ prefixes: [storagePath] })
+    });
+  } catch (err) {
+    console.warn('클라우드 첨부파일 삭제 실패:', err);
+  }
+}
+
+function mapUserToDbRow(u) {
+  let cats = u.categories;
+  if (!Array.isArray(cats)) {
+    try {
+      const savedCats = localStorage.getItem(getUserCategoriesStorageKey(u.id));
+      cats = savedCats ? JSON.parse(savedCats) : DEFAULT_EXAMPLE_CATEGORIES;
+    } catch (_) {
+      cats = DEFAULT_EXAMPLE_CATEGORIES;
+    }
+  }
+  return {
+    id: u.id,
+    name: u.name || u.id,
+    password_hash: u.passwordHash || '',
+    share_enabled: u.shareEnabled !== false,
+    custom_hero_title: u.customHeroTitle || '',
+    custom_hero_desc: u.customHeroDesc || '',
+    categories: Array.isArray(cats) ? cats : DEFAULT_EXAMPLE_CATEGORIES
+  };
+}
+
+function mapDbRowToUser(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    passwordHash: row.password_hash,
+    shareEnabled: row.share_enabled !== false,
+    customHeroTitle: row.custom_hero_title || '',
+    customHeroDesc: row.custom_hero_desc || '',
+    categories: Array.isArray(row.categories)
+      ? row.categories
+      : JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES))
+  };
+}
+
+function mapItemToDbRow(item, ownerId) {
+  return {
+    id: item.id,
+    author_id: (item.authorId || ownerId || '').toLowerCase(),
+    author_name: item.authorName || '',
+    category: item.category || 'unclassified',
+    date: item.date || '',
+    title: item.title || '',
+    summary: item.summary || '',
+    description: item.description || '',
+    highlights: Array.isArray(item.highlights) ? item.highlights : [],
+    video_url: item.videoUrl || '',
+    attachments: Array.isArray(item.attachments) ? item.attachments : [],
+    tags: Array.isArray(item.tags) ? item.tags : [],
+    links: Array.isArray(item.links) ? item.links : []
+  };
+}
+
+function mapDbRowToItem(row) {
+  return {
+    id: row.id,
+    category: row.category,
+    date: row.date,
+    authorId: row.author_id,
+    authorName: row.author_name,
+    title: row.title,
+    summary: row.summary,
+    description: row.description,
+    highlights: Array.isArray(row.highlights) ? row.highlights : [],
+    videoUrl: row.video_url || '',
+    attachments: Array.isArray(row.attachments) ? row.attachments : [],
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    links: Array.isArray(row.links) ? row.links : []
+  };
+}
+
+async function sbUpsertUsers(userList) {
+  if (!Array.isArray(userList) || userList.length === 0) return;
+  const rows = userList.map(mapUserToDbRow);
+  await sbRest('portfolio_users?on_conflict=id', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates',
+    body: rows
+  });
+}
+
+async function sbUpsertItem(item, ownerId) {
+  const row = mapItemToDbRow(item, ownerId);
+  await sbRest('portfolio_items?on_conflict=id', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates',
+    body: row
+  });
+}
+
+async function sbDeleteItem(itemId) {
+  await sbRest(`portfolio_items?id=eq.${encodeURIComponent(itemId)}`, {
+    method: 'DELETE'
+  });
+}
+
+async function sbUpsertSetting(key, value) {
+  await sbRest('app_settings?on_conflict=key', {
+    method: 'POST',
+    prefer: 'resolution=merge-duplicates',
+    body: { key, value: String(value) }
+  });
+}
+
 function getStoredInviteCode() {
   try {
     const code = localStorage.getItem(INVITE_CODE_STORAGE_KEY);
@@ -25,9 +203,13 @@ function getStoredInviteCode() {
 }
 
 function setStoredInviteCode(newCode) {
+  const trimmed = newCode.trim();
   try {
-    localStorage.setItem(INVITE_CODE_STORAGE_KEY, newCode.trim());
+    localStorage.setItem(INVITE_CODE_STORAGE_KEY, trimmed);
   } catch (_) {}
+  sbUpsertSetting('invite_code', trimmed).catch((err) => {
+    console.warn('초대 코드 클라우드 저장 실패:', err);
+  });
 }
 
 function getUserCategoriesStorageKey(userId) {
@@ -696,37 +878,198 @@ function buildShareUrlForUser(userId) {
 }
 
 // ==================== 계정 및 계정별 고유 공간(Workspace) 로드 & 저장 ====================
-function loadUsersAndSession() {
+async function migrateLocalAttachmentToCloud(att, ownerId) {
+  if (!att || att.inlineContent || att.publicUrl) return att;
   try {
-    const saved = localStorage.getItem(USERS_STORAGE_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        users = parsed.map((u) => ({
-          ...u,
-          shareEnabled: u.shareEnabled !== false
-        }));
+    const blob = await getAttachmentBlob(att.id);
+    if (!blob) return att;
+    const storagePath = getSafeStoragePath(ownerId, att.id, att.name);
+    const publicUrl = await sbUploadFile(storagePath, blob);
+    return { ...att, storagePath, publicUrl };
+  } catch (err) {
+    console.warn('로컬 첨부파일 클라우드 마이그레이션 실패:', att.name, err);
+    return att;
+  }
+}
+
+async function syncFromCloud() {
+  try {
+    const [dbSettings, dbUsers, dbItems] = await Promise.all([
+      sbRest('app_settings?select=*'),
+      sbRest('portfolio_users?select=*&order=created_at.asc'),
+      sbRest('portfolio_items?select=*&order=created_at.desc')
+    ]);
+
+    isCloudConnected = true;
+
+    // 1) 초대 코드 동기화
+    if (Array.isArray(dbSettings)) {
+      const inviteRow = dbSettings.find((s) => s.key === 'invite_code');
+      if (inviteRow && inviteRow.value) {
+        try {
+          localStorage.setItem(INVITE_CODE_STORAGE_KEY, inviteRow.value);
+        } catch (_) {}
+      }
+    }
+
+    // 2) 클라우드에 사용자 데이터가 이미 존재하면 클라우드 데이터를 기준으로 동기화
+    if (Array.isArray(dbUsers) && dbUsers.length > 0) {
+      users = dbUsers.map(mapDbRowToUser);
+      cloudItemsByUser = {};
+
+      for (const u of users) {
+        const uid = u.id.toLowerCase();
+        cloudItemsByUser[uid] = [];
+        try {
+          localStorage.setItem(getUserCategoriesStorageKey(uid), JSON.stringify(u.categories));
+        } catch (_) {}
+      }
+
+      if (Array.isArray(dbItems)) {
+        for (const row of dbItems) {
+          const item = mapDbRowToItem(row);
+          const uid = (item.authorId || '').toLowerCase();
+          if (!cloudItemsByUser[uid]) cloudItemsByUser[uid] = [];
+          cloudItemsByUser[uid].push(item);
+        }
+      }
+
+      try {
+        localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+        for (const [uid, list] of Object.entries(cloudItemsByUser)) {
+          localStorage.setItem(getUserItemsStorageKey(uid), JSON.stringify(list));
+        }
+      } catch (_) {}
+      return true;
+    }
+
+    // 3) 클라우드 DB가 완전히 비어있는 최초 1회: 현재 브라우저의 로컬 데이터(또는 기본 데이터)를 자동 업로드
+    let seedUsers = [];
+    try {
+      const savedUsersRaw = localStorage.getItem(USERS_STORAGE_KEY);
+      const parsed = savedUsersRaw ? JSON.parse(savedUsersRaw) : null;
+      seedUsers = Array.isArray(parsed) && parsed.length > 0 ? parsed : [...INITIAL_USERS];
+    } catch (_) {
+      seedUsers = [...INITIAL_USERS];
+    }
+
+    if (!seedUsers.some((u) => u.id.toLowerCase() === 'admin')) {
+      seedUsers.unshift({ ...INITIAL_USERS[0] });
+    }
+
+    const hydratedUsers = seedUsers.map((u) => {
+      const uid = u.id.toLowerCase();
+      let cats = u.categories;
+      if (!Array.isArray(cats)) {
+        try {
+          const savedCats = localStorage.getItem(getUserCategoriesStorageKey(uid));
+          cats = savedCats ? JSON.parse(savedCats) : JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES));
+        } catch (_) {
+          cats = JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES));
+        }
+      }
+      return {
+        ...u,
+        shareEnabled: u.shareEnabled !== false,
+        categories: Array.isArray(cats) ? cats : JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES))
+      };
+    });
+
+    await sbUpsertUsers(hydratedUsers);
+    await sbUpsertSetting('invite_code', getStoredInviteCode()).catch(() => {});
+
+    cloudItemsByUser = {};
+    const allSeedItemsToUpload = [];
+    for (const u of hydratedUsers) {
+      const uid = u.id.toLowerCase();
+      let userItems = [];
+      try {
+        const savedItemsRaw = localStorage.getItem(getUserItemsStorageKey(uid));
+        if (savedItemsRaw !== null) {
+          const parsed = JSON.parse(savedItemsRaw);
+          userItems = Array.isArray(parsed) ? parsed : [];
+        } else {
+          userItems = JSON.parse(JSON.stringify(INITIAL_ITEMS_BY_USER[uid] || []));
+        }
+      } catch (_) {
+        userItems = JSON.parse(JSON.stringify(INITIAL_ITEMS_BY_USER[uid] || []));
+      }
+
+      // 기존에 로컬 IndexedDB에만 있던 첨부파일도 클라우드 스토리지로 자동 이관
+      for (const item of userItems) {
+        if (Array.isArray(item.attachments) && item.attachments.length > 0) {
+          const migrated = [];
+          for (const att of item.attachments) {
+            migrated.push(await migrateLocalAttachmentToCloud(att, uid));
+          }
+          item.attachments = migrated;
+        }
+        allSeedItemsToUpload.push(mapItemToDbRow(item, uid));
+      }
+      cloudItemsByUser[uid] = userItems;
+    }
+
+    if (allSeedItemsToUpload.length > 0) {
+      await sbRest('portfolio_items?on_conflict=id', {
+        method: 'POST',
+        prefer: 'resolution=merge-duplicates',
+        body: allSeedItemsToUpload
+      });
+    }
+
+    users = hydratedUsers;
+    try {
+      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+      for (const [uid, list] of Object.entries(cloudItemsByUser)) {
+        localStorage.setItem(getUserItemsStorageKey(uid), JSON.stringify(list));
+      }
+    } catch (_) {}
+    return true;
+  } catch (err) {
+    console.warn('Supabase 클라우드 동기화 실패 (로컬 모드로 동작):', err);
+    isCloudConnected = false;
+    return false;
+  }
+}
+
+function loadUsersAndSession() {
+  if (!isCloudConnected) {
+    try {
+      const saved = localStorage.getItem(USERS_STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          users = parsed.map((u) => ({
+            ...u,
+            shareEnabled: u.shareEnabled !== false
+          }));
+        } else {
+          users = [...INITIAL_USERS];
+        }
       } else {
         users = [...INITIAL_USERS];
       }
-    } else {
+    } catch (_) {
       users = [...INITIAL_USERS];
     }
-  } catch (_) {
-    users = [...INITIAL_USERS];
   }
 
-  // 기본 계정 admin 및 designer가 없거나 누락된 경우 복원/보장
+  // 기본 계정 admin이 없거나 누락된 경우 복원/보장
   const adminExists = users.some((u) => u.id.toLowerCase() === 'admin');
   if (!adminExists) {
     users.unshift({
       id: 'admin',
       name: '관리자',
       passwordHash: '57ddef0eaa2372510a661562674582b056dfe04b098d89d21f554604f04873b2',
-      shareEnabled: true
+      shareEnabled: true,
+      categories: JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES))
     });
     saveUsers();
   }
+
+  // URL에 ?share=<userId> 파라미터가 있는지 먼저 확인
+  const params = new URLSearchParams(window.location.search);
+  const sharedUserId = params.get('share');
 
   // 로그인 세션 확인
   try {
@@ -736,17 +1079,18 @@ function loadUsersAndSession() {
     } else if (sessionUserId) {
       const found = users.find((u) => u.id.toLowerCase() === sessionUserId.toLowerCase());
       currentUser = found ? { id: found.id, name: found.name } : null;
+    } else if (sharedUserId) {
+      // 타인이 공유 링크로 처음 접속한 경우 자동으로 관리자에 로그인되지 않도록 비로그인(게스트) 상태 유지
+      currentUser = null;
     } else if (users.length > 0) {
       currentUser = { id: users[0].id, name: users[0].name };
       localStorage.setItem(SESSION_STORAGE_KEY, currentUser.id);
     }
   } catch (_) {
-    currentUser = users.length > 0 ? { id: users[0].id, name: users[0].name } : null;
+    currentUser = sharedUserId ? null : (users.length > 0 ? { id: users[0].id, name: users[0].name } : null);
   }
 
   // URL에 ?share=<userId> 파라미터가 있으면 해당 사용자의 공유 공간(읽기 전용)으로 진입
-  const params = new URLSearchParams(window.location.search);
-  const sharedUserId = params.get('share');
   if (sharedUserId) {
     const target = users.find((u) => u.id.toLowerCase() === sharedUserId.toLowerCase());
     if (target && target.shareEnabled !== false) {
@@ -766,6 +1110,11 @@ function saveUsers() {
   } catch (err) {
     console.warn('사용자 저장 실패:', err);
   }
+  if (isCloudConnected) {
+    sbUpsertUsers(users).catch((err) => {
+      console.warn('사용자 클라우드 동기화 실패:', err);
+    });
+  }
 }
 
 /**
@@ -783,6 +1132,19 @@ function loadViewingWorkspaceData() {
   }
 
   const userId = viewingUser.id.toLowerCase();
+
+  if (isCloudConnected) {
+    const targetUserObj = users.find((u) => u.id.toLowerCase() === userId);
+    categories =
+      targetUserObj && Array.isArray(targetUserObj.categories)
+        ? JSON.parse(JSON.stringify(targetUserObj.categories))
+        : JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES));
+    items = Array.isArray(cloudItemsByUser[userId])
+      ? JSON.parse(JSON.stringify(cloudItemsByUser[userId]))
+      : [];
+    return;
+  }
+
   const catKey = getUserCategoriesStorageKey(userId);
   const itemKey = getUserItemsStorageKey(userId);
 
@@ -816,18 +1178,33 @@ function loadViewingWorkspaceData() {
 
 function saveCategories() {
   if (!isEditableWorkspace()) return;
+  const uid = currentUser.id.toLowerCase();
   try {
-    const catKey = getUserCategoriesStorageKey(currentUser.id);
+    const catKey = getUserCategoriesStorageKey(uid);
     localStorage.setItem(catKey, JSON.stringify(categories));
   } catch (_) {
     alert('카테고리 저장 용량을 초과했습니다. 아이콘 이미지 크기를 줄여주세요.');
+  }
+  const userObj = users.find((u) => u.id.toLowerCase() === uid);
+  if (userObj) {
+    userObj.categories = JSON.parse(JSON.stringify(categories));
+    try {
+      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+    } catch (_) {}
+    if (isCloudConnected) {
+      sbUpsertUsers([userObj]).catch((err) => {
+        console.warn('카테고리 클라우드 저장 실패:', err);
+      });
+    }
   }
 }
 
 function saveItems() {
   if (!isEditableWorkspace()) return;
+  const uid = currentUser.id.toLowerCase();
+  cloudItemsByUser[uid] = JSON.parse(JSON.stringify(items));
   try {
-    const itemKey = getUserItemsStorageKey(currentUser.id);
+    const itemKey = getUserItemsStorageKey(uid);
     localStorage.setItem(itemKey, JSON.stringify(items));
   } catch (err) {
     console.warn('작업물 저장 실패:', err);
@@ -974,6 +1351,9 @@ function renderWorkspaceHeaderAndPermissions() {
 
 function getUserItemCount(userId) {
   const uid = String(userId).toLowerCase();
+  if (isCloudConnected) {
+    return Array.isArray(cloudItemsByUser[uid]) ? cloudItemsByUser[uid].length : 0;
+  }
   try {
     const saved = localStorage.getItem(getUserItemsStorageKey(uid));
     if (saved !== null) {
@@ -1695,29 +2075,38 @@ async function renderModalAttachments(item) {
   }
 
   for (const media of mediaAttachments) {
-    const blob = await resolveAttachmentBlob(media);
-    if (!blob) continue;
+    let mediaSrc = '';
+    let downloadHref = '';
 
-    const objUrl = URL.createObjectURL(blob);
-    activeObjectUrls.push(objUrl);
+    if (media.publicUrl && sanitizeUrl(media.publicUrl)) {
+      mediaSrc = media.publicUrl;
+      downloadHref = `${media.publicUrl}?download=${encodeURIComponent(media.name || 'file')}`;
+    } else {
+      const blob = await resolveAttachmentBlob(media);
+      if (!blob) continue;
+      const objUrl = URL.createObjectURL(blob);
+      activeObjectUrls.push(objUrl);
+      mediaSrc = objUrl;
+      downloadHref = objUrl;
+    }
 
     if (media.kind === 'video') {
       mediaHtmlParts.push(`
         <div class="media-card">
-          <video class="video-player" controls preload="metadata" src="${objUrl}"></video>
+          <video class="video-player" controls preload="metadata" src="${escapeHtml(mediaSrc)}"></video>
           <div class="media-card-caption">
             <span>🎬 ${escapeHtml(media.name)} (${formatFileSize(media.size)})</span>
-            <a href="${objUrl}" download="${escapeHtml(media.name)}" class="text-btn">영상 다운로드</a>
+            <a href="${escapeHtml(downloadHref)}" download="${escapeHtml(media.name)}" class="text-btn">영상 다운로드</a>
           </div>
         </div>
       `);
     } else if (media.kind === 'image') {
       mediaHtmlParts.push(`
         <div class="media-card">
-          <img class="image-attachment-preview" src="${objUrl}" alt="${escapeHtml(media.name)}" />
+          <img class="image-attachment-preview" src="${escapeHtml(mediaSrc)}" alt="${escapeHtml(media.name)}" />
           <div class="media-card-caption">
             <span>🖼️ ${escapeHtml(media.name)} (${formatFileSize(media.size)})</span>
-            <a href="${objUrl}" download="${escapeHtml(media.name)}" class="text-btn">이미지 다운로드</a>
+            <a href="${escapeHtml(downloadHref)}" download="${escapeHtml(media.name)}" class="text-btn">이미지 다운로드</a>
           </div>
         </div>
       `);
@@ -1737,11 +2126,16 @@ async function renderModalAttachments(item) {
     const docCards = [];
 
     for (const doc of docAttachments) {
-      const blob = await resolveAttachmentBlob(doc);
-      if (!blob) continue;
-
-      const objUrl = URL.createObjectURL(blob);
-      activeObjectUrls.push(objUrl);
+      let downloadHref = '';
+      if (doc.publicUrl && sanitizeUrl(doc.publicUrl)) {
+        downloadHref = `${doc.publicUrl}?download=${encodeURIComponent(doc.name || 'file')}`;
+      } else {
+        const blob = await resolveAttachmentBlob(doc);
+        if (!blob) continue;
+        const objUrl = URL.createObjectURL(blob);
+        activeObjectUrls.push(objUrl);
+        downloadHref = objUrl;
+      }
 
       const canPreview = isPreviewableDocument(doc);
       const previewBtnHtml = canPreview
@@ -1759,7 +2153,7 @@ async function renderModalAttachments(item) {
           </div>
           <div class="file-actions">
             ${previewBtnHtml}
-            <a href="${objUrl}" download="${escapeHtml(doc.name)}" class="btn btn-primary btn-sm">다운로드</a>
+            <a href="${escapeHtml(downloadHref)}" download="${escapeHtml(doc.name)}" class="btn btn-primary btn-sm">다운로드</a>
           </div>
         </div>
       `);
@@ -1775,6 +2169,14 @@ async function renderModalAttachments(item) {
 async function resolveAttachmentBlob(attMeta) {
   if (attMeta.inlineContent) {
     return new Blob([attMeta.inlineContent], { type: attMeta.type || 'text/plain;charset=utf-8' });
+  }
+  if (attMeta.publicUrl && sanitizeUrl(attMeta.publicUrl)) {
+    try {
+      const res = await fetch(attMeta.publicUrl);
+      if (res.ok) return await res.blob();
+    } catch (err) {
+      console.warn('클라우드 첨부파일 로드 실패, 로컬 캐시 확인:', err);
+    }
   }
   return await getAttachmentBlob(attMeta.id);
 }
@@ -2416,10 +2818,12 @@ function initEvents() {
       id,
       name,
       passwordHash: hashedPw,
-      shareEnabled: true
+      shareEnabled: true,
+      categories: JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES))
     };
 
     users.push(newUser);
+    cloudItemsByUser[newUser.id.toLowerCase()] = [];
     saveUsers();
 
     localStorage.setItem(
@@ -2518,12 +2922,23 @@ function initEvents() {
 
       if (confirm(`'${target.title}' 항목과 첨부된 파일을 모두 삭제하시겠습니까?`)) {
         for (const att of target.attachments || []) {
+          if (att.storagePath) {
+            await sbDeleteFile(att.storagePath);
+          }
           if (!att.inlineContent) {
             await deleteAttachmentBlob(att.id);
           }
         }
-        items = items.filter((i) => i.id !== selectedItemId);
+        const deletingId = selectedItemId;
+        items = items.filter((i) => i.id !== deletingId);
         saveItems();
+        if (isCloudConnected) {
+          try {
+            await sbDeleteItem(deletingId);
+          } catch (err) {
+            console.warn('클라우드 항목 삭제 실패:', err);
+          }
+        }
         closeDetailModal();
         renderGallery();
       }
@@ -2773,13 +3188,24 @@ function initEvents() {
       for (let i = 0; i < pendingFiles.length; i++) {
         const file = pendingFiles[i];
         const attId = `att-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 7)}`;
-        await saveAttachmentBlob(attId, file);
+        const storagePath = getSafeStoragePath(currentUser.id, attId, file.name);
+        let publicUrl = '';
+        try {
+          publicUrl = await sbUploadFile(storagePath, file);
+        } catch (uploadErr) {
+          console.warn('클라우드 스토리지 파일 업로드 실패 (로컬 저장으로 대체):', uploadErr);
+        }
+        try {
+          await saveAttachmentBlob(attId, file);
+        } catch (_) {}
         savedAttachments.push({
           id: attId,
           name: file.name,
           type: file.type || 'application/octet-stream',
           size: file.size,
-          kind: classifyFileKind(file)
+          kind: classifyFileKind(file),
+          storagePath: publicUrl ? storagePath : '',
+          publicUrl
         });
       }
 
@@ -2791,11 +3217,16 @@ function initEvents() {
           return;
         }
 
-        // 삭제된 기존 첨부파일의 IndexedDB Blob 정리
+        // 삭제된 기존 첨부파일의 클라우드 스토리지 및 IndexedDB Blob 정리
         const keptIds = new Set(editingExistingAttachments.map((a) => a.id));
         for (const oldAtt of target.attachments || []) {
-          if (!keptIds.has(oldAtt.id) && !oldAtt.inlineContent) {
-            await deleteAttachmentBlob(oldAtt.id);
+          if (!keptIds.has(oldAtt.id)) {
+            if (oldAtt.storagePath) {
+              await sbDeleteFile(oldAtt.storagePath);
+            }
+            if (!oldAtt.inlineContent) {
+              await deleteAttachmentBlob(oldAtt.id);
+            }
           }
         }
 
@@ -2811,6 +3242,12 @@ function initEvents() {
         target.attachments = [...editingExistingAttachments, ...savedAttachments];
 
         saveItems();
+        try {
+          await sbUpsertItem(target, currentUser.id);
+          isCloudConnected = true;
+        } catch (cloudErr) {
+          console.warn('클라우드 항목 수정 저장 실패:', cloudErr);
+        }
         renderGallery();
         const updatedId = target.id;
         closeAddModal();
@@ -2835,6 +3272,12 @@ function initEvents() {
 
         items.unshift(newItem);
         saveItems();
+        try {
+          await sbUpsertItem(newItem, currentUser.id);
+          isCloudConnected = true;
+        } catch (cloudErr) {
+          console.warn('클라우드 항목 등록 저장 실패:', cloudErr);
+        }
         closeAddModal();
         renderGallery();
       }
@@ -2896,10 +3339,15 @@ function initEvents() {
   });
 }
 
-// 초기화 실행
-document.addEventListener('DOMContentLoaded', () => {
+// 초기화 실행 (Supabase 클라우드 동기화 우선 로드)
+document.addEventListener('DOMContentLoaded', async () => {
+  initEvents();
+  if (portfolioGrid) {
+    portfolioGrid.innerHTML =
+      '<div style="grid-column:1/-1; text-align:center; padding:48px 16px; color:var(--text-muted); font-size:0.95rem;">☁️ 클라우드에서 포트폴리오 데이터를 불러오는 중입니다...</div>';
+  }
+  await syncFromCloud();
   loadUsersAndSession();
   loadViewingWorkspaceData();
-  initEvents();
   renderGallery();
 });
