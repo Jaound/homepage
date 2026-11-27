@@ -1314,6 +1314,14 @@ function exitReadOnlySharedSpace() {
 
 // ==================== 사용자 인증 & 권한 UI ====================
 function renderAuthStatusBar() {
+  if (isReadOnlySharedMode()) {
+    // 읽기 전용 공유 모드에서는 공유 설정, 계정 설정, 로그아웃 등 계정 관리 UI 숨김
+    authStatusBar.innerHTML = '';
+    authStatusBar.classList.add('hidden');
+    return;
+  }
+
+  authStatusBar.classList.remove('hidden');
   if (currentUser) {
     authStatusBar.innerHTML = `
       <div class="user-profile-pill" title="현재 로그인된 계정">
@@ -1339,6 +1347,11 @@ function renderAuthStatusBar() {
 function renderWorkspaceHeaderAndPermissions() {
   const editable = isEditableWorkspace();
   const readOnly = isReadOnlySharedMode();
+
+  // 타인 공간 검색 버튼: 읽기 전용 공유 모드에서는 숨김
+  if (openExploreModalBtn) {
+    openExploreModalBtn.classList.toggle('hidden', readOnly);
+  }
 
   // 편집 버튼 노출/잠금 제어
   if (editable) {
@@ -3786,6 +3799,14 @@ function initEvents() {
 // 초기화 실행 (Supabase 클라우드 동기화 우선 로드)
 document.addEventListener('DOMContentLoaded', async () => {
   initEvents();
+  if (new URLSearchParams(window.location.search).has('share')) {
+    if (openExploreModalBtn) openExploreModalBtn.classList.add('hidden');
+    if (openAddModalBtn) openAddModalBtn.classList.add('hidden');
+    if (authStatusBar) {
+      authStatusBar.innerHTML = '';
+      authStatusBar.classList.add('hidden');
+    }
+  }
   if (portfolioGrid) {
     portfolioGrid.innerHTML =
       '<div style="grid-column:1/-1; text-align:center; padding:48px 16px; color:var(--text-muted); font-size:0.95rem;">☁️ 클라우드에서 포트폴리오 데이터를 불러오는 중입니다...</div>';
