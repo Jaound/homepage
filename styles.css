@@ -426,25 +426,58 @@ body {
 }
 
 .card-cover {
-  height: 148px;
-  padding: 20px;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
   position: relative;
+  overflow: hidden;
   color: #ffffff;
+}
+
+.card-cover-thumb-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  z-index: 0;
+  transition: transform 0.3s ease;
+}
+
+.portfolio-card:hover .card-cover-thumb-img {
+  transform: scale(1.02);
+}
+
+.card-cover-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(15, 23, 42, 0.48) 0%,
+    rgba(15, 23, 42, 0.06) 38%,
+    rgba(15, 23, 42, 0.06) 65%,
+    rgba(15, 23, 42, 0.56) 100%
+  );
 }
 
 .card-cover-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  position: relative;
+  z-index: 2;
 }
 
 .card-icon {
   font-size: 2rem;
   line-height: 1;
-  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.15));
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.25));
 }
 
 .card-date-chip {
@@ -452,14 +485,17 @@ body {
   font-weight: 600;
   padding: 4px 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(4px);
+  background: rgba(15, 23, 42, 0.35);
+  backdrop-filter: blur(6px);
 }
 
 .card-cover-label {
   font-size: 0.8rem;
-  font-weight: 500;
-  opacity: 0.9;
+  font-weight: 600;
+  opacity: 0.96;
+  position: relative;
+  z-index: 2;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
 }
 
 .card-body {
@@ -1960,4 +1996,192 @@ body {
   .settings-section-header {
     flex-direction: column;
   }
+}
+
+/* ==================== 카드 상단 썸네일 16:9 프레임 편집기 ==================== */
+.thumb-frame-spec-badge {
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--accent-primary);
+  background: var(--accent-soft);
+  padding: 3px 9px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.thumb-editor-box {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-subtle);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.thumb-frame-stage {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px dashed var(--border-hover);
+  background: #0f172a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.thumb-frame-stage:hover,
+.thumb-frame-stage.dragover {
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.thumb-frame-stage.has-image {
+  border-style: solid;
+  border-color: var(--border-color);
+  cursor: grab;
+}
+
+.thumb-frame-stage.has-image:active {
+  cursor: grabbing;
+}
+
+.thumb-editor-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.thumb-empty-guide {
+  padding: 20px;
+  text-align: center;
+  color: #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.thumb-guide-icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.thumb-guide-title {
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: #ffffff;
+  margin: 0;
+}
+
+.thumb-guide-sub {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+  margin: 0;
+  max-width: 420px;
+  line-height: 1.45;
+}
+
+.thumb-overlay-guide {
+  position: absolute;
+  inset: 0;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.thumb-guide-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.thumb-guide-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(15, 23, 42, 0.45);
+  border: 1px dashed rgba(255, 255, 255, 0.45);
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.thumb-guide-bottom {
+  align-self: flex-start;
+}
+
+.thumb-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.thumb-controls-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.thumb-fit-buttons,
+.thumb-action-buttons {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.btn-xs {
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  border-radius: 7px;
+}
+
+.thumb-fit-buttons .btn.active {
+  background-color: var(--accent-primary);
+  color: #ffffff;
+  border-color: var(--accent-primary);
+}
+
+.thumb-zoom-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.thumb-zoom-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  margin: 0;
+}
+
+.thumb-zoom-slider {
+  flex: 1;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.thumb-zoom-value {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  min-width: 44px;
+  text-align: right;
+}
+
+.thumb-meta-info {
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }

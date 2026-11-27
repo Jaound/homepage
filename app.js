@@ -537,6 +537,49 @@ const existingFilesContainer = document.getElementById('existing-files-container
 const existingFilesList = document.getElementById('existing-files-list');
 const selectedFilesList = document.getElementById('selected-files-list');
 
+// 카드 상단 썸네일 16:9 프레임 편집기 요소 & 상태
+const itemThumbnailInput = document.getElementById('item-thumbnail-input');
+const thumbFrameStage = document.getElementById('thumb-frame-stage');
+const thumbEditorCanvas = document.getElementById('thumb-editor-canvas');
+const thumbEmptyGuide = document.getElementById('thumb-empty-guide');
+const thumbOverlayGuide = document.getElementById('thumb-overlay-guide');
+const thumbControls = document.getElementById('thumb-controls');
+const thumbFitCoverBtn = document.getElementById('thumb-fit-cover-btn');
+const thumbFitContainBtn = document.getElementById('thumb-fit-contain-btn');
+const thumbResetPosBtn = document.getElementById('thumb-reset-pos-btn');
+const thumbChangeBtn = document.getElementById('thumb-change-btn');
+const thumbRemoveBtn = document.getElementById('thumb-remove-btn');
+const thumbZoomSlider = document.getElementById('thumb-zoom-slider');
+const thumbZoomValue = document.getElementById('thumb-zoom-value');
+const thumbMetaInfo = document.getElementById('thumb-meta-info');
+
+const THUMB_WIDTH = 960;
+const THUMB_HEIGHT = 540;
+let thumbImg = null;
+let thumbObjectUrl = null;
+let thumbFitMode = 'cover'; // 'cover' | 'contain'
+let thumbZoom = 1;
+let thumbOffsetX = 0;
+let thumbOffsetY = 0;
+let thumbIsDragging = false;
+let thumbDragStartX = 0;
+let thumbDragStartY = 0;
+let thumbDragOriginX = 0;
+let thumbDragOriginY = 0;
+let thumbDirty = false;
+let thumbRemoved = false;
+let editingOriginalThumbnail = null;
+
+function getItemThumbnail(item) {
+  if (!item || !Array.isArray(item.attachments)) return null;
+  return item.attachments.find((a) => a.kind === 'thumbnail') || null;
+}
+
+function getVisibleAttachments(item) {
+  if (!item || !Array.isArray(item.attachments)) return [];
+  return item.attachments.filter((a) => a.kind !== 'thumbnail');
+}
+
 // 카테고리 관리 모달 요소
 const categoryModal = document.getElementById('category-modal');
 const openCategoryModalBtn = document.getElementById('open-category-modal-btn');
@@ -1805,10 +1848,17 @@ function renderGallery() {
         .map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`)
         .join('');
 
-      const attachments = item.attachments || [];
+      const attachments = getVisibleAttachments(item);
       const videoCount =
         attachments.filter((a) => a.kind === 'video').length + (item.videoUrl ? 1 : 0);
       const docCount = attachments.filter((a) => a.kind === 'document' || a.kind === 'image').length;
+
+      const thumbAtt = getItemThumbnail(item);
+      const rawThumbSrc = thumbAtt ? (thumbAtt.publicUrl || thumbAtt.inlineDataUrl || '') : '';
+      const safeThumbSrc =
+        rawThumbSrc && (rawThumbSrc.startsWith('data:image/') || sanitizeUrl(rawThumbSrc))
+          ? rawThumbSrc
+          : '';
 
       const pills = [];
       if (videoCount > 0) pills.push(`<span class="attach-pill">🎬 영상 ${videoCount}</span>`);
@@ -1816,7 +1866,12 @@ function renderGallery() {
 
       return `
         <article class="portfolio-card" data-id="${escapeHtml(item.id)}" tabindex="0" role="button" aria-label="${escapeHtml(item.title)} 상세 보기">
-          <div class="card-cover" style="background: ${meta.gradient}">
+          <div class="card-cover ${safeThumbSrc ? 'has-thumbnail' : ''}" style="background: ${meta.gradient}">
+            ${
+              safeThumbSrc
+                ? `<img class="card-cover-thumb-img" src="${escapeHtml(safeThumbSrc)}" alt="${escapeHtml(item.title)} 썸네일" loading="lazy" /><div class="card-cover-scrim"></div>`
+                : ''
+            }
             <div class="card-cover-top">
               <span class="card-icon" aria-hidden="true">${renderCategoryIconHtml(meta, 'card')}</span>
               <span class="card-date-chip">${escapeHtml(item.date)}</span>
@@ -1975,7 +2030,17 @@ async function openDetailModal(itemId) {
   selectedItemId = item.id;
   const meta = getCategoryMeta(item.category);
 
-  modalBanner.style.background = meta.gradient;
+  const thumbAtt = getItemThumbnail(item);
+  const rawThumbSrc = thumbAtt ? (thumbAtt.publicUrl || thumbAtt.inlineDataUrl || '') : '';
+  const safeThumbSrc =
+    rawThumbSrc && (rawThumbSrc.startsWith('data:image/') || sanitizeUrl(rawThumbSrc))
+      ? rawThumbSrc
+      : '';
+  if (safeThumbSrc) {
+    modalBanner.style.background = `linear-gradient(180deg, rgba(15, 23, 42, 0.48), rgba(15, 23, 42, 0.82)), url("${safeThumbSrc}") center / cover no-repeat`;
+  } else {
+    modalBanner.style.background = meta.gradient;
+  }
   modalCategoryBadge.className = 'badge';
   modalCategoryBadge.style.cssText = 'background: rgba(255,255,255,0.22); color: #ffffff;';
   modalCategoryBadge.textContent = meta.label;
@@ -2039,7 +2104,7 @@ async function openDetailModal(itemId) {
 }
 
 async function renderModalAttachments(item) {
-  const attachments = item.attachments || [];
+  const attachments = getVisibleAttachments(item);
   const mediaAttachments = attachments.filter((a) => a.kind === 'video' || a.kind === 'image');
   const docAttachments = attachments.filter((a) => a.kind !== 'video' && a.kind !== 'image');
 
@@ -2309,6 +2374,168 @@ function renderExistingFilesList() {
     .join('');
 }
 
+// ==================== 카드 상단 썸네일 16:9 프레임 편집기 로직 ====================
+function updateThumbnailStageBackground() {
+  if (!thumbFrameStage) return;
+  const meta = getCategoryMeta(itemCategorySelect ? itemCategorySelect.value : '');
+  thumbFrameStage.style.background = meta.gradient;
+}
+
+function updateThumbnailFitButtons() {
+  if (thumbFitCoverBtn) thumbFitCoverBtn.classList.toggle('active', thumbFitMode === 'cover');
+  if (thumbFitContainBtn) thumbFitContainBtn.classList.toggle('active', thumbFitMode === 'contain');
+  if (thumbZoomSlider) thumbZoomSlider.value = String(Math.round(thumbZoom * 100));
+  if (thumbZoomValue) thumbZoomValue.textContent = `${Math.round(thumbZoom * 100)}%`;
+}
+
+function renderThumbnailCanvas() {
+  if (!thumbEditorCanvas || !thumbImg) return;
+  const ctx = thumbEditorCanvas.getContext('2d');
+  if (!ctx) return;
+
+  const meta = getCategoryMeta(itemCategorySelect ? itemCategorySelect.value : '');
+  const baseColor = meta.color || '#1e293b';
+  const grad = ctx.createLinearGradient(0, 0, THUMB_WIDTH, THUMB_HEIGHT);
+  grad.addColorStop(0, darkenHex(baseColor, 0.28));
+  grad.addColorStop(1, baseColor);
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, THUMB_WIDTH, THUMB_HEIGHT);
+
+  const natW = thumbImg.naturalWidth || thumbImg.width;
+  const natH = thumbImg.naturalHeight || thumbImg.height;
+  if (!natW || !natH) return;
+
+  // 비율 왜곡 없이 원본 비율(natW / natH)을 그대로 유지한 채 배율 계산
+  const coverScale = Math.max(THUMB_WIDTH / natW, THUMB_HEIGHT / natH);
+  const containScale = Math.min(THUMB_WIDTH / natW, THUMB_HEIGHT / natH);
+  const baseScale = thumbFitMode === 'contain' ? containScale : coverScale;
+  const finalScale = baseScale * thumbZoom;
+
+  const drawW = natW * finalScale;
+  const drawH = natH * finalScale;
+  const drawX = (THUMB_WIDTH - drawW) / 2 + thumbOffsetX;
+  const drawY = (THUMB_HEIGHT - drawH) / 2 + thumbOffsetY;
+
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(thumbImg, drawX, drawY, drawW, drawH);
+}
+
+function resetThumbnailEditor() {
+  if (thumbObjectUrl) {
+    URL.revokeObjectURL(thumbObjectUrl);
+    thumbObjectUrl = null;
+  }
+  thumbImg = null;
+  thumbFitMode = 'cover';
+  thumbZoom = 1;
+  thumbOffsetX = 0;
+  thumbOffsetY = 0;
+  thumbIsDragging = false;
+  thumbDirty = false;
+  thumbRemoved = false;
+  editingOriginalThumbnail = null;
+
+  if (itemThumbnailInput) itemThumbnailInput.value = '';
+  if (thumbEditorCanvas) thumbEditorCanvas.classList.add('hidden');
+  if (thumbOverlayGuide) thumbOverlayGuide.classList.add('hidden');
+  if (thumbControls) thumbControls.classList.add('hidden');
+  if (thumbEmptyGuide) thumbEmptyGuide.classList.remove('hidden');
+  if (thumbFrameStage) thumbFrameStage.classList.remove('has-image');
+  updateThumbnailStageBackground();
+  updateThumbnailFitButtons();
+}
+
+function showLoadedThumbnailImage(img, { isExisting = false } = {}) {
+  thumbImg = img;
+  thumbFitMode = 'cover';
+  thumbZoom = 1;
+  thumbOffsetX = 0;
+  thumbOffsetY = 0;
+  thumbRemoved = false;
+  thumbDirty = !isExisting;
+
+  if (thumbEditorCanvas) thumbEditorCanvas.classList.remove('hidden');
+  if (thumbOverlayGuide) thumbOverlayGuide.classList.remove('hidden');
+  if (thumbControls) thumbControls.classList.remove('hidden');
+  if (thumbEmptyGuide) thumbEmptyGuide.classList.add('hidden');
+  if (thumbFrameStage) thumbFrameStage.classList.add('has-image');
+
+  updateThumbnailFitButtons();
+  renderThumbnailCanvas();
+
+  if (thumbMetaInfo) {
+    thumbMetaInfo.textContent = isExisting
+      ? `현재 적용된 썸네일 (${img.naturalWidth} × ${img.naturalHeight} px) · 드래그·확대 조절 또는 [이미지 변경]으로 교체할 수 있습니다.`
+      : `원본: ${img.naturalWidth} × ${img.naturalHeight} px → 프레임 출력: ${THUMB_WIDTH} × ${THUMB_HEIGHT} px (16:9) · 드래그하여 위치 이동, 휠/슬라이더로 확대·축소`;
+  }
+}
+
+function loadThumbnailFile(file) {
+  if (!file) return;
+  const lowerName = (file.name || '').toLowerCase();
+  if (!file.type.startsWith('image/') || lowerName.endsWith('.svg')) {
+    alert('PNG, JPG, WebP, GIF 형식의 이미지 파일만 썸네일로 등록할 수 있습니다.');
+    return;
+  }
+
+  if (thumbObjectUrl) {
+    URL.revokeObjectURL(thumbObjectUrl);
+    thumbObjectUrl = null;
+  }
+
+  const objUrl = URL.createObjectURL(file);
+  thumbObjectUrl = objUrl;
+
+  const img = new Image();
+  img.onload = () => {
+    showLoadedThumbnailImage(img, { isExisting: false });
+  };
+  img.onerror = () => {
+    alert('이미지를 불러오지 못했습니다. 다른 이미지 파일을 선택해 주세요.');
+    if (thumbObjectUrl) {
+      URL.revokeObjectURL(thumbObjectUrl);
+      thumbObjectUrl = null;
+    }
+  };
+  img.src = objUrl;
+}
+
+function loadExistingThumbnailUrl(url) {
+  if (!url) return;
+  const img = new Image();
+  if (!url.startsWith('data:')) {
+    img.crossOrigin = 'anonymous';
+  }
+  img.onload = () => {
+    showLoadedThumbnailImage(img, { isExisting: true });
+  };
+  img.onerror = () => {
+    // 기존 이미지 로드 실패 시 빈 상태 유지
+  };
+  img.src = url;
+}
+
+function exportThumbnailBlob() {
+  return new Promise((resolve) => {
+    if (!thumbEditorCanvas || !thumbImg) return resolve(null);
+    renderThumbnailCanvas();
+    try {
+      thumbEditorCanvas.toBlob(
+        (blob) => {
+          if (blob) return resolve(blob);
+          thumbEditorCanvas.toBlob((jpegBlob) => resolve(jpegBlob || null), 'image/jpeg', 0.9);
+        },
+        'image/webp',
+        0.9
+      );
+    } catch (err) {
+      console.warn('썸네일 캔버스 내보내기 실패:', err);
+      resolve(null);
+    }
+  });
+}
+
 function openAddModal() {
   if (!isEditableWorkspace()) {
     alert('읽기 전용 공유 모드에서는 새 작업물을 등록할 수 없습니다.');
@@ -2330,6 +2557,7 @@ function openAddModal() {
   pendingFiles = [];
   renderPendingFilesList();
   renderCategorySelectOptions(categories[0] ? categories[0].id : '');
+  resetThumbnailEditor();
 
   const now = new Date();
   const yyyy = now.getFullYear();
@@ -2353,10 +2581,10 @@ function openEditItemModal(itemId) {
   closeDetailModal();
 
   editingItemId = item.id;
-  editingExistingAttachments = Array.isArray(item.attachments) ? item.attachments.map((a) => ({ ...a })) : [];
+  editingExistingAttachments = getVisibleAttachments(item).map((a) => ({ ...a }));
 
   if (addModalTitle) addModalTitle.textContent = '작업물 / 자료 수정';
-  if (addModalDesc) addModalDesc.textContent = '등록된 프로젝트 정보, 아카이브 설명, 첨부파일 및 링크를 수정합니다.';
+  if (addModalDesc) addModalDesc.textContent = '등록된 프로젝트 정보, 썸네일, 첨부파일 및 링크를 수정합니다.';
   if (submitAddBtn) {
     submitAddBtn.disabled = false;
     submitAddBtn.textContent = '수정 완료';
@@ -2365,6 +2593,13 @@ function openEditItemModal(itemId) {
   addItemForm.reset();
   renderCategorySelectOptions(item.category);
   if (itemCategorySelect) itemCategorySelect.value = item.category;
+
+  resetThumbnailEditor();
+  editingOriginalThumbnail = getItemThumbnail(item);
+  if (editingOriginalThumbnail) {
+    const thumbSrc = editingOriginalThumbnail.publicUrl || editingOriginalThumbnail.inlineDataUrl || '';
+    if (thumbSrc) loadExistingThumbnailUrl(thumbSrc);
+  }
 
   const dateEl = document.getElementById('item-date');
   if (dateEl) dateEl.value = item.date || '';
@@ -2408,6 +2643,7 @@ function closeAddModal() {
   editingExistingAttachments = [];
   pendingFiles = [];
   renderPendingFilesList();
+  resetThumbnailEditor();
   if (existingFilesContainer) existingFilesContainer.classList.add('hidden');
   if (existingFilesList) existingFilesList.innerHTML = '';
 }
@@ -2945,6 +3181,162 @@ function initEvents() {
     });
   }
 
+  // ==================== 카드 상단 썸네일 16:9 프레임 편집기 이벤트 ====================
+  if (itemCategorySelect) {
+    itemCategorySelect.addEventListener('change', () => {
+      updateThumbnailStageBackground();
+      if (thumbImg) renderThumbnailCanvas();
+    });
+  }
+
+  if (thumbFrameStage && itemThumbnailInput) {
+    // 빈 프레임 클릭 시 파일 선택 창 오픈
+    thumbFrameStage.addEventListener('click', () => {
+      if (!thumbImg) {
+        itemThumbnailInput.click();
+      }
+    });
+
+    // 드래그 앤 드롭으로 썸네일 이미지 삽입
+    thumbFrameStage.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      thumbFrameStage.classList.add('dragover');
+    });
+
+    thumbFrameStage.addEventListener('dragleave', () => {
+      thumbFrameStage.classList.remove('dragover');
+    });
+
+    thumbFrameStage.addEventListener('drop', (e) => {
+      e.preventDefault();
+      thumbFrameStage.classList.remove('dragover');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        loadThumbnailFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    // 포인터 드래그로 프레임 내부 이미지 위치 이동 (마우스/터치 모두 지원)
+    thumbFrameStage.addEventListener('pointerdown', (e) => {
+      if (!thumbImg) return;
+      e.preventDefault();
+      thumbIsDragging = true;
+      thumbDragStartX = e.clientX;
+      thumbDragStartY = e.clientY;
+      thumbDragOriginX = thumbOffsetX;
+      thumbDragOriginY = thumbOffsetY;
+      try {
+        thumbFrameStage.setPointerCapture(e.pointerId);
+      } catch (_) {}
+    });
+
+    thumbFrameStage.addEventListener('pointermove', (e) => {
+      if (!thumbIsDragging || !thumbImg) return;
+      const rect = thumbFrameStage.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      const scaleX = THUMB_WIDTH / rect.width;
+      const scaleY = THUMB_HEIGHT / rect.height;
+      thumbOffsetX = thumbDragOriginX + (e.clientX - thumbDragStartX) * scaleX;
+      thumbOffsetY = thumbDragOriginY + (e.clientY - thumbDragStartY) * scaleY;
+      thumbDirty = true;
+      renderThumbnailCanvas();
+    });
+
+    const endThumbDrag = (e) => {
+      if (!thumbIsDragging) return;
+      thumbIsDragging = false;
+      try {
+        thumbFrameStage.releasePointerCapture(e.pointerId);
+      } catch (_) {}
+    };
+    thumbFrameStage.addEventListener('pointerup', endThumbDrag);
+    thumbFrameStage.addEventListener('pointercancel', endThumbDrag);
+
+    // 마우스 휠로 부드럽게 확대/축소
+    thumbFrameStage.addEventListener(
+      'wheel',
+      (e) => {
+        if (!thumbImg) return;
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.08 : -0.08;
+        thumbZoom = Math.min(3, Math.max(0.5, Number((thumbZoom + delta).toFixed(2))));
+        thumbDirty = true;
+        updateThumbnailFitButtons();
+        renderThumbnailCanvas();
+      },
+      { passive: false }
+    );
+  }
+
+  if (itemThumbnailInput) {
+    itemThumbnailInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files[0]) {
+        loadThumbnailFile(e.target.files[0]);
+      }
+      itemThumbnailInput.value = '';
+    });
+  }
+
+  if (thumbChangeBtn && itemThumbnailInput) {
+    thumbChangeBtn.addEventListener('click', () => itemThumbnailInput.click());
+  }
+
+  if (thumbRemoveBtn) {
+    thumbRemoveBtn.addEventListener('click', () => {
+      const prevOriginal = editingOriginalThumbnail;
+      resetThumbnailEditor();
+      editingOriginalThumbnail = prevOriginal;
+      thumbRemoved = true;
+    });
+  }
+
+  if (thumbFitCoverBtn) {
+    thumbFitCoverBtn.addEventListener('click', () => {
+      if (!thumbImg) return;
+      thumbFitMode = 'cover';
+      thumbZoom = 1;
+      thumbOffsetX = 0;
+      thumbOffsetY = 0;
+      thumbDirty = true;
+      updateThumbnailFitButtons();
+      renderThumbnailCanvas();
+    });
+  }
+
+  if (thumbFitContainBtn) {
+    thumbFitContainBtn.addEventListener('click', () => {
+      if (!thumbImg) return;
+      thumbFitMode = 'contain';
+      thumbZoom = 1;
+      thumbOffsetX = 0;
+      thumbOffsetY = 0;
+      thumbDirty = true;
+      updateThumbnailFitButtons();
+      renderThumbnailCanvas();
+    });
+  }
+
+  if (thumbResetPosBtn) {
+    thumbResetPosBtn.addEventListener('click', () => {
+      if (!thumbImg) return;
+      thumbZoom = 1;
+      thumbOffsetX = 0;
+      thumbOffsetY = 0;
+      thumbDirty = true;
+      updateThumbnailFitButtons();
+      renderThumbnailCanvas();
+    });
+  }
+
+  if (thumbZoomSlider) {
+    thumbZoomSlider.addEventListener('input', (e) => {
+      if (!thumbImg) return;
+      thumbZoom = Math.min(3, Math.max(0.5, Number(e.target.value) / 100));
+      thumbDirty = true;
+      updateThumbnailFitButtons();
+      renderThumbnailCanvas();
+    });
+  }
+
   // 파일 드롭존 클릭 & 드래그 앤 드롭
   if (fileDropZone && fileInput) {
     fileDropZone.addEventListener('click', () => fileInput.click());
@@ -3209,6 +3601,38 @@ function initEvents() {
         });
       }
 
+      // 카드 상단 썸네일 처리 (16:9 캔버스 내보내기 -> Supabase Storage 업로드)
+      let finalThumbnailAtt = null;
+      if (thumbImg && thumbDirty) {
+        const thumbBlob = await exportThumbnailBlob();
+        if (thumbBlob) {
+          const thumbId = `thumb-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+          const isWebp = (thumbBlob.type || '').includes('webp');
+          const thumbName = isWebp ? 'thumbnail.webp' : 'thumbnail.jpg';
+          const thumbPath = getSafeStoragePath(currentUser.id, thumbId, thumbName);
+          let thumbPublicUrl = '';
+          let inlineDataUrl = '';
+          try {
+            thumbPublicUrl = await sbUploadFile(thumbPath, thumbBlob);
+          } catch (thumbErr) {
+            console.warn('썸네일 클라우드 업로드 실패 (인라인 데이터로 대체):', thumbErr);
+            inlineDataUrl = thumbEditorCanvas.toDataURL('image/jpeg', 0.82);
+          }
+          finalThumbnailAtt = {
+            id: thumbId,
+            name: thumbName,
+            type: thumbBlob.type || 'image/webp',
+            size: thumbBlob.size,
+            kind: 'thumbnail',
+            storagePath: thumbPublicUrl ? thumbPath : '',
+            publicUrl: thumbPublicUrl,
+            inlineDataUrl
+          };
+        }
+      } else if (!thumbRemoved && editingOriginalThumbnail) {
+        finalThumbnailAtt = editingOriginalThumbnail;
+      }
+
       if (editingItemId) {
         // ========== 항목 수정 모드 ==========
         const target = items.find((i) => i.id === editingItemId);
@@ -3217,9 +3641,19 @@ function initEvents() {
           return;
         }
 
-        // 삭제된 기존 첨부파일의 클라우드 스토리지 및 IndexedDB Blob 정리
+        // 기존 썸네일이 교체되거나 제거된 경우 스토리지 정리
+        if (
+          editingOriginalThumbnail &&
+          editingOriginalThumbnail.storagePath &&
+          (thumbRemoved || (thumbImg && thumbDirty))
+        ) {
+          await sbDeleteFile(editingOriginalThumbnail.storagePath);
+        }
+
+        // 삭제된 기존 일반 첨부파일의 클라우드 스토리지 및 IndexedDB Blob 정리
         const keptIds = new Set(editingExistingAttachments.map((a) => a.id));
         for (const oldAtt of target.attachments || []) {
+          if (oldAtt.kind === 'thumbnail') continue;
           if (!keptIds.has(oldAtt.id)) {
             if (oldAtt.storagePath) {
               await sbDeleteFile(oldAtt.storagePath);
@@ -3228,6 +3662,11 @@ function initEvents() {
               await deleteAttachmentBlob(oldAtt.id);
             }
           }
+        }
+
+        const updatedAttachments = [...editingExistingAttachments, ...savedAttachments];
+        if (finalThumbnailAtt) {
+          updatedAttachments.push(finalThumbnailAtt);
         }
 
         target.category = category;
@@ -3239,7 +3678,7 @@ function initEvents() {
         target.videoUrl = videoUrl;
         target.tags = tags;
         target.links = links;
-        target.attachments = [...editingExistingAttachments, ...savedAttachments];
+        target.attachments = updatedAttachments;
 
         saveItems();
         try {
@@ -3254,6 +3693,11 @@ function initEvents() {
         openDetailModal(updatedId);
       } else {
         // ========== 신규 등록 모드 ==========
+        const initialAttachments = [...savedAttachments];
+        if (finalThumbnailAtt) {
+          initialAttachments.push(finalThumbnailAtt);
+        }
+
         const newItem = {
           id: `item-${Date.now()}`,
           category,
@@ -3265,7 +3709,7 @@ function initEvents() {
           description,
           highlights,
           videoUrl,
-          attachments: savedAttachments,
+          attachments: initialAttachments,
           tags,
           links
         };

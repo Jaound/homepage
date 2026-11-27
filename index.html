@@ -260,6 +260,62 @@
           <textarea id="item-highlights" rows="3" placeholder="반응형 레이아웃 설계&#10;성능 최적화 및 번들 사이즈 40% 절감&#10;설계 문서 및 API 명세서 포함"></textarea>
         </div>
 
+        <!-- 카드 상단 썸네일 이미지 (16:9 프레임 미리보기 및 맞춤 조절) -->
+        <div class="form-group">
+          <div class="label-with-action">
+            <label>카드 상단 썸네일 이미지 (선택 · 16:9 프레임)</label>
+            <span class="thumb-frame-spec-badge">프레임 규격: 16:9 (960 × 540 px)</span>
+          </div>
+
+          <input type="file" id="item-thumbnail-input" accept="image/*" class="file-input-hidden" />
+
+          <div id="thumb-editor-box" class="thumb-editor-box">
+            <!-- 실제 카드 상단과 동일한 16:9 비율 프레임 -->
+            <div id="thumb-frame-stage" class="thumb-frame-stage" title="드래그하여 이미지 위치 이동 · 휠로 확대/축소">
+              <canvas id="thumb-editor-canvas" width="960" height="540" class="thumb-editor-canvas hidden"></canvas>
+
+              <!-- 이미지 미선택 시 표시되는 빈 프레임 안내 -->
+              <div id="thumb-empty-guide" class="thumb-empty-guide">
+                <span class="thumb-guide-icon">🖼️</span>
+                <p class="thumb-guide-title">여기를 클릭하거나 이미지를 드래그해 썸네일을 넣어보세요</p>
+                <p class="thumb-guide-sub">실제 카드 상단과 동일한 <strong>16:9 (960 × 540 px)</strong> 프레임에 맞춰 비율 왜곡 없이 위치·확대를 조절할 수 있습니다.</p>
+              </div>
+
+              <!-- 카드 위 실제 배지/아이콘 위치 참고 가이드 -->
+              <div id="thumb-overlay-guide" class="thumb-overlay-guide hidden" aria-hidden="true">
+                <div class="thumb-guide-top">
+                  <span class="thumb-guide-chip">아이콘 위치</span>
+                  <span class="thumb-guide-chip">날짜 배지</span>
+                </div>
+                <span class="thumb-guide-chip thumb-guide-bottom">카테고리 라벨</span>
+              </div>
+            </div>
+
+            <!-- 썸네일 선택 후 노출되는 맞춤/확대/제거 컨트롤 -->
+            <div id="thumb-controls" class="thumb-controls hidden">
+              <div class="thumb-controls-row">
+                <div class="thumb-fit-buttons">
+                  <button type="button" id="thumb-fit-cover-btn" class="btn btn-secondary btn-xs active" title="프레임을 빈틈없이 꽉 채웁니다">꽉 채우기</button>
+                  <button type="button" id="thumb-fit-contain-btn" class="btn btn-secondary btn-xs" title="이미지 잘림 없이 전체를 프레임 안에 맞춥니다">원본 전체 맞춤</button>
+                  <button type="button" id="thumb-reset-pos-btn" class="btn btn-secondary btn-xs" title="위치와 배율을 초기화합니다">중앙 초기화</button>
+                </div>
+                <div class="thumb-action-buttons">
+                  <button type="button" id="thumb-change-btn" class="btn btn-outline btn-xs">이미지 변경</button>
+                  <button type="button" id="thumb-remove-btn" class="btn btn-danger-ghost btn-xs">제거</button>
+                </div>
+              </div>
+
+              <div class="thumb-zoom-row">
+                <label for="thumb-zoom-slider" class="thumb-zoom-label">확대/축소</label>
+                <input type="range" id="thumb-zoom-slider" min="50" max="300" step="1" value="100" class="thumb-zoom-slider" />
+                <span id="thumb-zoom-value" class="thumb-zoom-value">100%</span>
+              </div>
+
+              <div id="thumb-meta-info" class="thumb-meta-info">드래그하여 위치를 조절하고 슬라이더·마우스 휠로 크기를 맞추세요.</div>
+            </div>
+          </div>
+        </div>
+
         <!-- 파일 첨부 (영상 / 문서 / 이미지) -->
         <div class="form-group">
           <label>영상 및 문서 파일 첨부 (다중 선택 가능)</label>
