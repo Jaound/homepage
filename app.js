@@ -20,6 +20,42 @@ const SUPABASE_URL = 'https://txgnreadbaprnacxjrth.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_XCDhjVUZa7hIxf0qdOGbpg_W2dWCrd3';
 const SUPABASE_BUCKET = 'portfolio-files';
 
+// ==================== EmailJS 비밀번호 찾기 인증메일 설정 ====================
+const EMAILJS_SERVICE_ID = 'service_j0rleg4';
+const EMAILJS_TEMPLATE_ID = 'template_scchi9m';
+const EMAILJS_PUBLIC_KEY = 'bP9SvsxMMF5buKRsz';
+
+function generateSixDigitCode() {
+  if (window.crypto && window.crypto.getRandomValues) {
+    const arr = new Uint32Array(1);
+    window.crypto.getRandomValues(arr);
+    return String(100000 + (arr[0] % 900000));
+  }
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
+
+async function sendPasswordResetEmail({ toEmail, userName, userId, code }) {
+  const res = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      service_id: EMAILJS_SERVICE_ID,
+      template_id: EMAILJS_TEMPLATE_ID,
+      user_id: EMAILJS_PUBLIC_KEY,
+      template_params: {
+        to_email: toEmail,
+        user_name: userName || userId,
+        user_id: userId,
+        code
+      }
+    })
+  });
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`인증 메일 발송 실패 (${res.status}): ${errText}`);
+  }
+}
+
 let isCloudConnected = false;
 let cloudItemsByUser = {}; // { [userIdLower]: Item[] }
 
@@ -102,6 +138,7 @@ function mapUserToDbRow(u) {
   return {
     id: u.id,
     name: u.name || u.id,
+    email: (u.email || '').trim(),
     password_hash: u.passwordHash || '',
     share_enabled: u.shareEnabled !== false,
     custom_hero_title: u.customHeroTitle || '',
@@ -114,6 +151,7 @@ function mapDbRowToUser(row) {
   return {
     id: row.id,
     name: row.name,
+    email: (row.email || '').trim(),
     passwordHash: row.password_hash,
     shareEnabled: row.share_enabled !== false,
     customHeroTitle: row.custom_hero_title || '',
@@ -247,27 +285,15 @@ function legacyHashPassword(rawPassword) {
 
 // 비밀번호 검증 헬퍼 (SHA-256 우선 비교 및 레거시 해시 마이그레이션)
 async function verifyPassword(user, rawPassword) {
-  if (!user) return false;
+  if (!user || !user.passwordHash) return false;
 
   const rawTrimmed = String(rawPassword).trim();
-
-  // 관리자(admin) 및 디자이너(designer) 초기 기본 계정의 기본 비밀번호는 '1234'
-  if ((user.id.toLowerCase() === 'admin' || user.id.toLowerCase() === 'designer') && (rawTrimmed === '1234' || String(rawPassword) === '1234')) {
-    return true;
-  }
-
-  if (!user.passwordHash) return false;
   const shaHash = await hashPassword(rawPassword);
   if (user.passwordHash === shaHash) return true;
 
   // 공백이 포함되었을 경우를 대비한 검증
   const shaHashTrimmed = await hashPassword(rawTrimmed);
   if (user.passwordHash === shaHashTrimmed) return true;
-
-  // 1234에 대한 기존 해시값(하드코딩 오타 포함) 매칭 시 승인
-  if (user.passwordHash === 'd140e6118b6fc8e604ec224f8087f9ad07ea69a23d4cffaaee6e06b97b670f59') {
-    if (rawTrimmed === '1234') return true;
-  }
 
   // 기존 단순 32비트 해시인 경우 점검 후 SHA-256으로 자동 마이그레이션
   const legacyHash = legacyHashPassword(rawPassword);
@@ -285,12 +311,14 @@ const INITIAL_USERS = [
   {
     id: 'admin',
     name: '관리자',
+    email: 'jiungson1007@gmail.com',
     passwordHash: '57ddef0eaa2372510a661562674582b056dfe04b098d89d21f554604f04873b2',
     shareEnabled: true
   },
   {
     id: 'designer',
     name: '김디자인',
+    email: '',
     passwordHash: '57ddef0eaa2372510a661562674582b056dfe04b098d89d21f554604f04873b2',
     shareEnabled: true
   }
@@ -612,9 +640,29 @@ const loginIdInput = document.getElementById('login-id');
 const loginPwInput = document.getElementById('login-pw');
 const signupIdInput = document.getElementById('signup-id');
 const signupNameInput = document.getElementById('signup-name');
+const signupEmailInput = document.getElementById('signup-email');
 const signupPwInput = document.getElementById('signup-pw');
 const signupPwConfirmInput = document.getElementById('signup-pw-confirm');
 const inviteCodeInput = document.getElementById('invite-code');
+
+// 비밀번호 찾기 (이메일 인증) 모달 요소 & 상태
+const openForgotPwBtn = document.getElementById('open-forgot-pw-btn');
+const forgotPwPanel = document.getElementById('forgot-pw-panel');
+const forgotRequestForm = document.getElementById('forgot-request-form');
+const forgotIdInput = document.getElementById('forgot-id');
+const forgotEmailInput = document.getElementById('forgot-email');
+const sendResetCodeBtn = document.getElementById('send-reset-code-btn');
+const forgotVerifyForm = document.getElementById('forgot-verify-form');
+const resetCodeTimer = document.getElementById('reset-code-timer');
+const resendResetCodeBtn = document.getElementById('resend-reset-code-btn');
+const resetCodeInput = document.getElementById('reset-code-input');
+const resetNewPwInput = document.getElementById('reset-new-pw');
+const resetNewPwConfirmInput = document.getElementById('reset-new-pw-confirm');
+const confirmResetPwBtn = document.getElementById('confirm-reset-pw-btn');
+const backToLoginBtn = document.getElementById('back-to-login-btn');
+
+let activeResetState = null; // { userId, email, codeHash, expiresAt, failCount }
+let resetTimerIntervalId = null;
 
 // 타인 계정/공간 검색 모달 요소
 const exploreUsersModal = document.getElementById('explore-users-modal');
@@ -647,6 +695,11 @@ const closeAccountFooterBtn = document.getElementById('close-account-footer-btn'
 const profileNameForm = document.getElementById('profile-name-form');
 const editProfileNameInput = document.getElementById('edit-profile-name-input');
 const profileNameFeedback = document.getElementById('profile-name-feedback');
+
+// 복구용 이메일 설정 폼 요소
+const profileEmailForm = document.getElementById('profile-email-form');
+const editProfileEmailInput = document.getElementById('edit-profile-email-input');
+const profileEmailFeedback = document.getElementById('profile-email-feedback');
 
 // 헤더 인삿말 및 비밀번호 변경 폼 요소
 const heroCustomForm = document.getElementById('hero-custom-form');
@@ -1519,11 +1572,71 @@ function closeExploreUsersModal() {
   }
 }
 
+function resetForgotPasswordState() {
+  activeResetState = null;
+  if (resetTimerIntervalId) {
+    clearInterval(resetTimerIntervalId);
+    resetTimerIntervalId = null;
+  }
+  if (forgotRequestForm) forgotRequestForm.reset();
+  if (forgotVerifyForm) {
+    forgotVerifyForm.reset();
+    forgotVerifyForm.classList.add('hidden');
+  }
+  if (forgotRequestForm) forgotRequestForm.classList.remove('hidden');
+  if (sendResetCodeBtn) {
+    sendResetCodeBtn.disabled = false;
+    sendResetCodeBtn.textContent = '📧 인증번호 발송';
+  }
+  if (confirmResetPwBtn) {
+    confirmResetPwBtn.disabled = false;
+    confirmResetPwBtn.textContent = '비밀번호 재설정 완료';
+  }
+  if (resetCodeTimer) resetCodeTimer.textContent = '⏱️ 인증번호 유효시간: 05:00';
+}
+
+function startResetCountdown() {
+  if (resetTimerIntervalId) clearInterval(resetTimerIntervalId);
+  const updateTimerText = () => {
+    if (!activeResetState || !resetCodeTimer) return;
+    const remainMs = activeResetState.expiresAt - Date.now();
+    if (remainMs <= 0) {
+      resetCodeTimer.textContent = '⏱️ 인증번호가 만료되었습니다. [재발송]을 눌러주세요.';
+      clearInterval(resetTimerIntervalId);
+      resetTimerIntervalId = null;
+      return;
+    }
+    const totalSec = Math.ceil(remainMs / 1000);
+    const min = String(Math.floor(totalSec / 60)).padStart(2, '0');
+    const sec = String(totalSec % 60).padStart(2, '0');
+    resetCodeTimer.textContent = `⏱️ 인증번호 유효시간: ${min}:${sec}`;
+  };
+  updateTimerText();
+  resetTimerIntervalId = setInterval(updateTimerText, 1000);
+}
+
+function openForgotPasswordView() {
+  resetForgotPasswordState();
+  authAlert.classList.add('hidden');
+  if (loginForm) loginForm.classList.add('hidden');
+  if (signupForm) signupForm.classList.add('hidden');
+  if (forgotPwPanel) forgotPwPanel.classList.remove('hidden');
+  if (forgotIdInput && loginIdInput && loginIdInput.value.trim()) {
+    forgotIdInput.value = loginIdInput.value.trim();
+  }
+  setTimeout(() => {
+    if (forgotIdInput && !forgotIdInput.value) forgotIdInput.focus();
+    else if (forgotEmailInput) forgotEmailInput.focus();
+  }, 40);
+}
+
 function switchAuthTab(tabName) {
   document.querySelectorAll('.auth-tab-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.tab === tabName);
   });
   authAlert.classList.add('hidden');
+  if (forgotPwPanel) forgotPwPanel.classList.add('hidden');
+  resetForgotPasswordState();
   if (tabName === 'login') {
     loginForm.classList.remove('hidden');
     signupForm.classList.add('hidden');
@@ -1533,8 +1646,11 @@ function switchAuthTab(tabName) {
   }
 }
 
-function showAuthAlert(msg) {
+function showAuthAlert(msg, isSuccess = false) {
   authAlert.textContent = msg;
+  authAlert.style.backgroundColor = isSuccess ? '#ecfdf5' : '';
+  authAlert.style.color = isSuccess ? '#047857' : '';
+  authAlert.style.borderColor = isSuccess ? '#a7f3d0' : '';
   authAlert.classList.remove('hidden');
 }
 
@@ -1542,6 +1658,7 @@ function openAuthModal(noticeMsg = '', onSuccess = null) {
   pendingAuthCallback = onSuccess;
   loginForm.reset();
   signupForm.reset();
+  resetForgotPasswordState();
   switchAuthTab('login');
 
   if (noticeMsg) {
@@ -1558,6 +1675,7 @@ function openAuthModal(noticeMsg = '', onSuccess = null) {
 function closeAuthModal() {
   authModal.classList.add('hidden');
   pendingAuthCallback = null;
+  resetForgotPasswordState();
   if (
     addModal.classList.contains('hidden') &&
     detailModal.classList.contains('hidden') &&
@@ -1631,6 +1749,10 @@ function openAccountSettingsModal() {
   // 프로필 표시 이름 입력 필드 초기화
   if (editProfileNameInput) editProfileNameInput.value = userObj.name || '';
   if (profileNameFeedback) profileNameFeedback.textContent = '';
+
+  // 복구용 이메일 입력 필드 초기화
+  if (editProfileEmailInput) editProfileEmailInput.value = userObj.email || '';
+  if (profileEmailFeedback) profileEmailFeedback.textContent = '';
 
   // 인삿말 설정 폼 초기화
   if (customHeroTitleInput) customHeroTitleInput.value = userObj.customHeroTitle || '';
@@ -2841,6 +2963,40 @@ function initEvents() {
     });
   }
 
+  // 복구용 이메일 변경 저장
+  if (profileEmailForm) {
+    profileEmailForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!currentUser) return;
+      const userObj = users.find((u) => u.id.toLowerCase() === currentUser.id.toLowerCase());
+      if (!userObj) return;
+
+      const newEmail = editProfileEmailInput ? editProfileEmailInput.value.trim() : '';
+      if (!newEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmail)) {
+        if (profileEmailFeedback) {
+          profileEmailFeedback.style.color = '#dc2626';
+          profileEmailFeedback.textContent = '올바른 이메일 주소를 입력해 주세요.';
+        }
+        return;
+      }
+
+      userObj.email = newEmail;
+      saveUsers();
+      if (isCloudConnected) {
+        try {
+          await sbUpsertUsers([userObj]);
+        } catch (err) {
+          console.warn('이메일 클라우드 저장 실패:', err);
+        }
+      }
+
+      if (profileEmailFeedback) {
+        profileEmailFeedback.style.color = '#059669';
+        profileEmailFeedback.textContent = '✓ 복구용 이메일 주소가 안전하게 저장되었습니다!';
+      }
+    });
+  }
+
   // 내 공간 헤더 인삿말 커스텀 저장
   if (heroCustomForm) {
     heroCustomForm.addEventListener('submit', (e) => {
@@ -3004,28 +3160,187 @@ function initEvents() {
     if (typeof cb === 'function') cb();
   });
 
-  // admin 계정 긴급 복원 및 초기화 버튼 이벤트
-  const resetAccountAuthBtn = document.getElementById('reset-account-auth-btn');
-  if (resetAccountAuthBtn) {
-    resetAccountAuthBtn.addEventListener('click', async () => {
-      loginFailCount = 0;
-      lockUntilTimestamp = 0;
-      const hashed1234 = await hashPassword('1234');
-      const adminIdx = users.findIndex((u) => u.id.toLowerCase() === 'admin');
-      if (adminIdx !== -1) {
-        users[adminIdx].passwordHash = hashed1234;
-      } else {
-        users.unshift({
-          id: 'admin',
-          name: '관리자',
-          passwordHash: hashed1234,
-          shareEnabled: true
-        });
+  // 비밀번호 찾기 (이메일 6자리 인증코드 발송 및 재설정)
+  if (openForgotPwBtn) {
+    openForgotPwBtn.addEventListener('click', openForgotPasswordView);
+  }
+
+  if (backToLoginBtn) {
+    backToLoginBtn.addEventListener('click', () => {
+      switchAuthTab('login');
+    });
+  }
+
+  async function requestPasswordResetCode(targetId, targetEmail) {
+    const userObj = users.find((u) => u.id.toLowerCase() === targetId.toLowerCase());
+    if (!userObj) {
+      showAuthAlert('입력하신 아이디를 찾을 수 없습니다.');
+      return false;
+    }
+    const registeredEmail = (userObj.email || '').trim().toLowerCase();
+    if (!registeredEmail) {
+      showAuthAlert('이 계정에 등록된 복구용 이메일이 없습니다. 계정 설정에서 먼저 이메일을 등록해 주세요.');
+      return false;
+    }
+    if (registeredEmail !== targetEmail.trim().toLowerCase()) {
+      showAuthAlert('계정에 등록된 복구용 이메일 주소와 일치하지 않습니다.');
+      return false;
+    }
+
+    const code = generateSixDigitCode();
+    const codeHash = await hashPassword(`reset_${userObj.id.toLowerCase()}_${code}`);
+
+    await sendPasswordResetEmail({
+      toEmail: userObj.email.trim(),
+      userName: userObj.name,
+      userId: userObj.id,
+      code
+    });
+
+    activeResetState = {
+      userId: userObj.id,
+      email: userObj.email.trim(),
+      codeHash,
+      expiresAt: Date.now() + 5 * 60 * 1000, // 5분 유효
+      failCount: 0
+    };
+    startResetCountdown();
+    return true;
+  }
+
+  if (forgotRequestForm) {
+    forgotRequestForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const targetId = forgotIdInput ? forgotIdInput.value.trim() : '';
+      const targetEmail = forgotEmailInput ? forgotEmailInput.value.trim() : '';
+      if (!targetId || !targetEmail) {
+        showAuthAlert('아이디와 등록된 복구용 이메일을 모두 입력해 주세요.');
+        return;
       }
-      saveUsers();
-      loginIdInput.value = 'admin';
-      loginPwInput.value = '1234';
-      showAuthAlert('✓ admin 계정 비밀번호가 1234로 초기화되었습니다! [로그인] 버튼을 눌러주세요.');
+
+      if (sendResetCodeBtn) {
+        sendResetCodeBtn.disabled = true;
+        sendResetCodeBtn.textContent = '메일 발송 중...';
+      }
+      authAlert.classList.add('hidden');
+
+      try {
+        const sent = await requestPasswordResetCode(targetId, targetEmail);
+        if (sent) {
+          forgotRequestForm.classList.add('hidden');
+          if (forgotVerifyForm) forgotVerifyForm.classList.remove('hidden');
+          showAuthAlert(`✓ ${targetEmail} 주소로 6자리 인증번호를 발송했습니다. 메일함(또는 스팸함)을 확인해 주세요.`, true);
+          setTimeout(() => {
+            if (resetCodeInput) resetCodeInput.focus();
+          }, 50);
+        }
+      } catch (err) {
+        console.error('인증 메일 발송 오류:', err);
+        showAuthAlert('인증 메일 발송 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.');
+      } finally {
+        if (sendResetCodeBtn) {
+          sendResetCodeBtn.disabled = false;
+          sendResetCodeBtn.textContent = '📧 인증번호 발송';
+        }
+      }
+    });
+  }
+
+  if (resendResetCodeBtn) {
+    resendResetCodeBtn.addEventListener('click', async () => {
+      if (!activeResetState) return;
+      resendResetCodeBtn.disabled = true;
+      resendResetCodeBtn.textContent = '발송 중...';
+      try {
+        const sent = await requestPasswordResetCode(activeResetState.userId, activeResetState.email);
+        if (sent) {
+          if (resetCodeInput) resetCodeInput.value = '';
+          showAuthAlert('✓ 새 6자리 인증번호를 이메일로 다시 발송했습니다.', true);
+        }
+      } catch (err) {
+        console.error('인증 메일 재발송 오류:', err);
+        showAuthAlert('인증 메일 재발송에 실패했습니다. 잠시 후 다시 시도해 주세요.');
+      } finally {
+        resendResetCodeBtn.disabled = false;
+        resendResetCodeBtn.textContent = '재발송';
+      }
+    });
+  }
+
+  if (forgotVerifyForm) {
+    forgotVerifyForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!activeResetState) {
+        showAuthAlert('인증 세션이 만료되었습니다. 처음부터 다시 시도해 주세요.');
+        return;
+      }
+      if (Date.now() > activeResetState.expiresAt) {
+        showAuthAlert('인증번호 유효시간(5분)이 만료되었습니다. [재발송] 버튼을 눌러 새 인증번호를 받아주세요.');
+        return;
+      }
+
+      const enteredCode = resetCodeInput ? resetCodeInput.value.trim() : '';
+      const newPw = resetNewPwInput ? resetNewPwInput.value : '';
+      const newPwConfirm = resetNewPwConfirmInput ? resetNewPwConfirmInput.value : '';
+
+      const enteredHash = await hashPassword(`reset_${activeResetState.userId.toLowerCase()}_${enteredCode}`);
+      if (enteredHash !== activeResetState.codeHash) {
+        activeResetState.failCount++;
+        if (activeResetState.failCount >= 5) {
+          activeResetState = null;
+          if (resetTimerIntervalId) clearInterval(resetTimerIntervalId);
+          forgotVerifyForm.classList.add('hidden');
+          forgotRequestForm.classList.remove('hidden');
+          showAuthAlert('인증번호를 5회 이상 잘못 입력하여 인증이 취소되었습니다. 다시 발송해 주세요.');
+        } else {
+          showAuthAlert(`인증번호가 일치하지 않습니다. (오입력 ${activeResetState.failCount}/5회)`);
+        }
+        return;
+      }
+
+      if (newPw.length < 4) {
+        showAuthAlert('새 비밀번호는 4자리 이상 입력해 주세요.');
+        return;
+      }
+      if (newPw !== newPwConfirm) {
+        showAuthAlert('새 비밀번호와 비밀번호 확인이 일치하지 않습니다.');
+        return;
+      }
+
+      const targetUser = users.find((u) => u.id.toLowerCase() === activeResetState.userId.toLowerCase());
+      if (!targetUser) {
+        showAuthAlert('계정을 찾을 수 없습니다.');
+        return;
+      }
+
+      if (confirmResetPwBtn) {
+        confirmResetPwBtn.disabled = true;
+        confirmResetPwBtn.textContent = '변경 저장 중...';
+      }
+
+      try {
+        targetUser.passwordHash = await hashPassword(newPw);
+        saveUsers();
+        if (isCloudConnected) {
+          await sbUpsertUsers([targetUser]);
+        }
+
+        const recoveredId = targetUser.id;
+        loginFailCount = 0;
+        lockUntilTimestamp = 0;
+        switchAuthTab('login');
+        if (loginIdInput) loginIdInput.value = recoveredId;
+        if (loginPwInput) loginPwInput.value = '';
+        showAuthAlert('✓ 비밀번호가 성공적으로 재설정되었습니다! 새 비밀번호로 로그인해 주세요.', true);
+      } catch (err) {
+        console.error('비밀번호 재설정 저장 오류:', err);
+        showAuthAlert('비밀번호 저장 중 오류가 발생했습니다. 다시 시도해 주세요.');
+      } finally {
+        if (confirmResetPwBtn) {
+          confirmResetPwBtn.disabled = false;
+          confirmResetPwBtn.textContent = '비밀번호 재설정 완료';
+        }
+      }
     });
   }
 
@@ -3042,11 +3357,16 @@ function initEvents() {
 
     const id = signupIdInput.value.trim();
     const name = signupNameInput.value.trim();
+    const email = signupEmailInput ? signupEmailInput.value.trim() : '';
     const pw = signupPwInput.value;
     const pwConfirm = signupPwConfirmInput.value;
 
     if (id.length < 2) {
       showAuthAlert('아이디는 2글자 이상 입력해 주세요.');
+      return;
+    }
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      showAuthAlert('비밀번호 찾기에 사용할 올바른 이메일 주소를 입력해 주세요.');
       return;
     }
     if (users.some((u) => u.id.toLowerCase() === id.toLowerCase())) {
@@ -3066,6 +3386,7 @@ function initEvents() {
     const newUser = {
       id,
       name,
+      email,
       passwordHash: hashedPw,
       shareEnabled: true,
       categories: JSON.parse(JSON.stringify(DEFAULT_EXAMPLE_CATEGORIES))

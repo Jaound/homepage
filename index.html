@@ -504,11 +504,66 @@
             <button type="submit" class="btn btn-primary auth-submit-btn">로그인하여 내 공간 열기</button>
           </div>
           <div style="text-align:center; margin-top:10px;">
-            <button type="button" id="reset-account-auth-btn" class="text-btn" style="color:var(--accent-primary); font-size:0.84rem;">
-              🔄 admin 관리자 계정 초기화 (1234로 재설정)
+            <button type="button" id="open-forgot-pw-btn" class="text-btn" style="color:var(--accent-primary); font-size:0.86rem;">
+              🔑 비밀번호를 잊으셨나요? (이메일 인증 찾기)
             </button>
           </div>
         </form>
+
+        <!-- 비밀번호 찾기 (이메일 6자리 인증코드) -->
+        <div id="forgot-pw-panel" class="auth-form-stack hidden">
+          <div style="padding:12px 14px; border-radius:10px; background:var(--bg-subtle); border:1px solid var(--border-color); font-size:0.84rem; color:var(--text-secondary); line-height:1.5;">
+            가입 또는 계정 설정에 등록된 <strong>이메일 주소</strong>로 6자리 인증번호를 발송하여 안전하게 비밀번호를 재설정합니다.
+          </div>
+
+          <form id="forgot-request-form" class="auth-form-stack">
+            <div class="form-group">
+              <label for="forgot-id">아이디 (ID) *</label>
+              <input type="text" id="forgot-id" placeholder="비밀번호를 찾을 아이디를 입력하세요" required autocomplete="username" />
+            </div>
+
+            <div class="form-group">
+              <label for="forgot-email">등록된 복구용 이메일 *</label>
+              <input type="email" id="forgot-email" placeholder="예: name@gmail.com" required autocomplete="email" />
+            </div>
+
+            <div class="auth-submit-row">
+              <button type="submit" id="send-reset-code-btn" class="btn btn-primary auth-submit-btn">📧 인증번호 발송</button>
+            </div>
+          </form>
+
+          <form id="forgot-verify-form" class="auth-form-stack hidden">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 12px; border-radius:8px; background:var(--accent-soft); color:var(--accent-primary); font-size:0.82rem; font-weight:600;">
+              <span id="reset-code-timer">⏱️ 인증번호 유효시간: 05:00</span>
+              <button type="button" id="resend-reset-code-btn" class="text-btn" style="font-size:0.8rem;">재발송</button>
+            </div>
+
+            <div class="form-group">
+              <label for="reset-code-input">이메일로 받은 6자리 인증번호 *</label>
+              <input type="text" id="reset-code-input" inputmode="numeric" maxlength="6" placeholder="6자리 숫자 입력 (예: 123456)" required autocomplete="one-time-code" />
+            </div>
+
+            <div class="form-group">
+              <label for="reset-new-pw">새 비밀번호 *</label>
+              <input type="password" id="reset-new-pw" placeholder="새 비밀번호 (4자리 이상)" required autocomplete="new-password" />
+            </div>
+
+            <div class="form-group">
+              <label for="reset-new-pw-confirm">새 비밀번호 확인 *</label>
+              <input type="password" id="reset-new-pw-confirm" placeholder="새 비밀번호를 한 번 더 입력하세요" required autocomplete="new-password" />
+            </div>
+
+            <div class="auth-submit-row">
+              <button type="submit" id="confirm-reset-pw-btn" class="btn btn-primary auth-submit-btn">비밀번호 재설정 완료</button>
+            </div>
+          </form>
+
+          <div style="text-align:center; margin-top:4px;">
+            <button type="button" id="back-to-login-btn" class="text-btn" style="color:var(--text-secondary); font-size:0.84rem;">
+              ← 로그인 화면으로 돌아가기
+            </button>
+          </div>
+        </div>
 
         <!-- 회원가입(새 계정 추가) 폼 -->
         <form id="signup-form" class="auth-form-stack hidden">
@@ -526,6 +581,11 @@
           <div class="form-group">
             <label for="signup-name">표시 이름 / 닉네임 *</label>
             <input type="text" id="signup-name" placeholder="화면 상단과 공간 이름에 표시될 닉네임 (예: 김개발)" required />
+          </div>
+
+          <div class="form-group">
+            <label for="signup-email">복구용 이메일 주소 (비밀번호 찾기용) *</label>
+            <input type="email" id="signup-email" placeholder="예: name@gmail.com" required autocomplete="email" />
           </div>
 
           <div class="form-group">
@@ -672,6 +732,26 @@
               <button type="submit" class="btn btn-primary btn-sm">이름 저장하기</button>
             </div>
             <span id="profile-name-feedback" class="share-feedback"></span>
+          </form>
+        </div>
+
+        <!-- 1-2. 비밀번호 찾기용 복구 이메일 설정 섹션 -->
+        <div class="settings-section-box">
+          <div class="settings-section-header">
+            <div>
+              <h3 class="settings-box-title">📧 복구용 이메일 설정 (비밀번호 찾기)</h3>
+              <p class="settings-box-desc">비밀번호를 잊어버렸을 때 6자리 인증번호를 받을 이메일 주소입니다.</p>
+            </div>
+          </div>
+          <form id="profile-email-form" class="auth-form-stack" style="margin-top:10px;">
+            <div class="form-group">
+              <label for="edit-profile-email-input">복구용 이메일 주소 *</label>
+              <input type="email" id="edit-profile-email-input" placeholder="예: name@gmail.com" required autocomplete="email" />
+            </div>
+            <div class="category-add-actions" style="display:flex; justify-content:flex-end;">
+              <button type="submit" class="btn btn-primary btn-sm">이메일 저장하기</button>
+            </div>
+            <span id="profile-email-feedback" class="share-feedback"></span>
           </form>
         </div>
 
