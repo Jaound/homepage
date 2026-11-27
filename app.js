@@ -1366,9 +1366,9 @@ function renderWorkspaceHeaderAndPermissions() {
   if (readOnly && viewingUser) {
     sharedReadonlyBanner.classList.remove('hidden');
     sharedBannerText.textContent = `'${viewingUser.name} (${viewingUser.id})'님의 공유 공간을 읽기 전용으로 열람 중입니다. 열람 및 첨부파일 다운로드만 가능하며 추가·편집·삭제할 수 없습니다.`;
-    exitSharedViewBtn.textContent = currentUser
-      ? `내 공간(${currentUser.name})으로 돌아가기`
-      : `로그인 / 내 공간 열기`;
+    if (exitSharedViewBtn) {
+      exitSharedViewBtn.classList.add('hidden');
+    }
   } else {
     sharedReadonlyBanner.classList.add('hidden');
   }
@@ -3749,23 +3749,25 @@ function initEvents() {
   });
 
   // 현재 열람 중인 공간 데이터 JSON 백업 다운로드
-  exportJsonBtn.addEventListener('click', () => {
-    if (!viewingUser) return;
-    const backupPayload = {
-      exportedAt: new Date().toISOString(),
-      account: viewingUser,
-      categories,
-      items
-    };
-    const dataStr = JSON.stringify(backupPayload, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `portfolio-${viewingUser.id}-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  });
+  if (exportJsonBtn) {
+    exportJsonBtn.addEventListener('click', () => {
+      if (!viewingUser) return;
+      const backupPayload = {
+        exportedAt: new Date().toISOString(),
+        account: viewingUser,
+        categories,
+        items
+      };
+      const dataStr = JSON.stringify(backupPayload, null, 2);
+      const blob = new Blob([dataStr], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `portfolio-${viewingUser.id}-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    });
+  }
 
   // ESC 키로 모달 닫기
   window.addEventListener('keydown', (e) => {
